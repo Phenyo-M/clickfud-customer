@@ -1,0 +1,12 @@
+{
+  "name": "clickFud",
+  "short_name": "clickFud",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FAF9F6",
+  "theme_color": "#FF6B00",
+  "icons": [
+    { "src": "icons/clickfud-logo-full-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

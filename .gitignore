@@ -1,0 +1,10 @@
+# Local Netlify folder
+.netlify
+
+.vercel
+
+# Local Claude Code session config (not part of the app)
+.claude
+
+# Supabase CLI local link/cache state (machine-specific, not app source)
+supabase/.temp

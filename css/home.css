@@ -1,0 +1,518 @@
+﻿/* ============================================================
+   CLICKFUD — Public homepage (logged-out visitors)
+   ============================================================ */
+
+.home-page { background: var(--bg-body); color: var(--text-primary); min-height: 100vh; min-height: 100dvh; }
+
+/* ---------- Sticky header ----------
+   Solid black — same reasoning as .app-nav (components.css): matches
+   the black+orange logo lockup and the black curved topbar below it,
+   and drops the border-bottom so no light hairline shows as a stray
+   line under the header. */
+.home-header {
+  position: sticky; top: 0; z-index: 300;
+  background: #000; border-bottom: none; box-shadow: var(--shadow-sm);
+}
+.home-header-inner {
+  display: flex; align-items: center; gap: 18px; padding: 14px 20px;
+}
+.home-brand {
+  display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text-primary);
+  font-weight: 800; font-size: 19px; white-space: nowrap; cursor: pointer; flex-shrink: 0;
+}
+.home-brand-name { color: var(--color-primary); }
+.home-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; }
+.home-cart-btn { position: relative; }
+.home-cart-badge {
+  position: absolute; top: 2px; right: 2px; background: var(--color-error); color: #fff; font-size: 10px;
+  min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; padding: 0 3px; border: 2px solid var(--bg-surface);
+}
+
+/* ---------- Public nav row ---------- */
+.home-public-nav { background: var(--bg-surface-2); border-bottom: 1px solid var(--border-color); overflow-x: auto; }
+.home-public-nav-inner { display: flex; gap: 20px; padding: 0 20px; }
+.home-public-nav a {
+  display: inline-block; padding: 11px 2px; font-size: 13.5px; font-weight: 600; color: var(--text-secondary);
+  text-decoration: none; white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent;
+}
+.home-public-nav a:hover { color: var(--color-primary); border-color: var(--color-primary); }
+
+/* Anchor targets should land below the sticky header, not under it */
+.home-section, #home-top { scroll-margin-top: 90px; }
+
+/* ---------- Page content wrapper ---------- */
+.home-content { padding: 20px 20px 48px; }
+.storefront { max-width: 100%; }
+
+/* ---------- Homepage: topbar + large curved content sheet ----------
+   The existing site header (.home-header for guests, .app-nav for signed-in
+   customers — unchanged, still has the logo/cart/profile/etc.) stays
+   exactly as it was; these two elements are the homepage's OWN content,
+   rendered by renderBrowser(). The topbar sits on the page's own plain
+   background (cream, --bg-body — the same "background" the header
+   itself sits on, per the reference) with the pickup location/ETA shown
+   as solid orange pills for the color accent, not a colored block. The
+   curved sheet below is a true white surface (--bg-surface) with large
+   rounded top corners rising up from that cream background — the single
+   large panel everything else lives inside, not a rounded card for
+   every section. Both break out of whatever padded/centered ancestor
+   wraps them (.home-content for guests, .page-wrap for signed-in
+   customers — different padding values in each) using the standard
+   "100vw + -50vw margin" full-bleed trick, which works the same
+   regardless of the ancestor's own padding; the small negative top/
+   bottom margins below cancel that ancestor's vertical padding
+   specifically so the topbar sits flush under the sticky header and the
+   sheet's rounded top is what's actually visible on load. */
+.storefront-topbar {
+  position: relative; left: 50%; right: 50%; width: 100vw; margin-left: -50vw; margin-right: -50vw;
+  margin-top: -20px;
+  /* Solid black — deliberately the strongest possible contrast against
+     the white curved sheet below, so the large rounded top corners read
+     as an obvious curved shape rising off it, not a subtle tone shift.
+     Once a Top Advert is published, .storefront-topbar-media (below)
+     covers this in a full-bleed photo instead — no decorative filler
+     around it, the real advert image fills the space directly. */
+  background: #000;
+  color: #fff; padding: 0; display: flex; flex-direction: column; gap: 10px;
+  overflow: hidden;
+}
+/* When a Top Advert exists, its image/video is this absolutely
+   positioned full-bleed layer (z-index:0) filling the ENTIRE topbar
+   edge to edge — not a separate inset card with black space around
+   it. .storefront-topbar itself carries no padding (it would keep the
+   image from reaching the true edges, since inset:0 is measured from
+   the padding box) — the padding that used to live there moved onto
+   .storefront-topbar-pills/.storefront-advert-caption below instead,
+   so the photo can bleed all the way out while the pills/caption text
+   still keep their own inset from the edges as an overlay on top of
+   it. */
+.storefront-topbar.has-media { aspect-ratio: 2.6 / 1; justify-content: space-between; }
+.storefront-topbar-media { position: absolute; inset: 0; z-index: 0; }
+.storefront-topbar-media img, .storefront-topbar-media video {
+  display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
+}
+.storefront-topbar-pills {
+  position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 14px 20px 16px;
+}
+/* A caption after the pills (only rendered when the advert has a
+   title/promo_text) takes over the bottom padding instead, so the two
+   don't stack into a bigger gap than .storefront-topbar's gap:10px
+   already provides between them. */
+.storefront-topbar-pills:not(:last-child) { padding-bottom: 0; }
+/* Smaller than before on purpose — same pill, less prominent over the
+   advert photo. */
+.storefront-topbar-pickup {
+  display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; color: #fff;
+  background: var(--color-primary); padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+}
+.storefront-topbar-eta { font-size: 10px; font-weight: 800; color: #fff; background: var(--color-primary); padding: 4px 9px; border-radius: 999px; white-space: nowrap; }
+
+/* Optional caption for the Top Advert (js/top-advert.js, schema.sql
+   section 28) — sits in normal flex flow above .storefront-topbar-media
+   (z-index:1, same as the pills), so it overlays the bottom of the
+   photo. text-shadow (not a dark background panel) keeps it readable
+   over a busy image without adding any extra dark/decorative block. */
+.storefront-advert-caption { position: relative; z-index: 1; padding: 0 20px 16px; }
+.storefront-advert-title { font-size: 14px; font-weight: 800; color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,0.65); }
+.storefront-advert-sub { font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.9); margin-top: 2px; text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
+
+.storefront-curved {
+  position: relative; left: 50%; right: 50%; width: 100vw; margin-left: -50vw; margin-right: -50vw;
+  margin-top: -8px; margin-bottom: -48px;
+  background: var(--bg-surface); border-radius: 32px 32px 0 0;
+  padding: 22px 20px 40px;
+}
+@media (max-width: 480px) {
+  .storefront-topbar-pills { padding: 12px 16px 14px; }
+  .storefront-advert-caption { padding: 0 16px 14px; }
+  .storefront-curved { border-radius: 26px 26px 0 0; padding: 18px 16px 32px; margin-bottom: -40px; }
+}
+
+.view-all-link { background: none; border: none; color: var(--color-primary); font-size: 12.5px; font-weight: 700; cursor: pointer; padding: 4px; }
+
+/* The curved sheet is a white surface (--bg-surface) — .search-bar's own
+   default background is also --bg-surface (shared with the shop detail
+   page, where it sits on a different ambient background and needs no
+   change), so without this override it would blend invisibly into the
+   sheet here specifically. */
+.storefront-curved .search-bar { background: var(--bg-surface-2); border-color: transparent; }
+
+/* ---------- Popular Shops (horizontal mini cards) ---------- */
+.store-mini-row { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px; -ms-overflow-style: none; scrollbar-width: none; }
+.store-mini-row::-webkit-scrollbar { display: none; }
+.store-mini-card { flex: 0 0 auto; width: 150px; cursor: pointer; }
+.store-mini-img { position: relative; aspect-ratio: 4/3; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-surface-2); }
+.store-mini-img img { width: 100%; height: 100%; object-fit: cover; }
+.store-mini-img-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+.store-mini-status { position: absolute; top: 6px; left: 6px; font-size: 9px; padding: 2px 7px; }
+.store-mini-body { padding-top: 8px; }
+.store-mini-name { font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.store-mini-meta { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; margin-top: 2px; white-space: nowrap; }
+.store-mini-meta .dot { opacity: 0.5; }
+
+/* ---------- Promotions (horizontal mini cards, developer-controlled data only) ---------- */
+.promo-mini-row { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px; -ms-overflow-style: none; scrollbar-width: none; }
+.promo-mini-row::-webkit-scrollbar { display: none; }
+.promo-mini-card { flex: 0 0 auto; width: 200px; cursor: pointer; }
+.promo-mini-img { aspect-ratio: 16/10; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-surface-2); }
+.promo-mini-img img, .promo-mini-img video { width: 100%; height: 100%; object-fit: cover; }
+.promo-mini-title { font-size: 13.5px; font-weight: 700; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.promo-mini-sub { font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Hero banner ----------
+   A store promotion is a manager-uploaded image OR video of unknown/
+   arbitrary aspect ratio (portrait, square, landscape). The media box's
+   height is a TRUE FIXED value (not max-height, not auto, not derived
+   from the media's own intrinsic size) — this is load-bearing, not
+   cosmetic: an <img>/<video> sized to its own aspect ratio would make
+   the wrapper shrink-wrap differently per item, shoving the search bar,
+   category row and store grid below it up/down on every rotation (real,
+   measured layout shift). Fixing the box's height and setting the media
+   to width:100%;height:100% makes every image AND every video occupy
+   pixel-identical space regardless of what it actually contains.
+   object-fit: cover (not contain) fills that fixed box completely on
+   every edge — a mismatched aspect ratio gets center-cropped rather than
+   letterboxed, by explicit design choice: no black/empty bars around the
+   media, ever.
+   The card shows ONLY the media plus the Order Now button (no badge/
+   title/shop-name text overlay) — there is deliberately no gradient or
+   translucent scrim sitting over the photo/video either, since nothing
+   needs to be read over it anymore; the button is its own solid,
+   opaque orange element, so it doesn't need a backdrop to stay legible.
+   The plain (no active promotion) fallback keeps the original full-
+   bleed centered-text treatment since there's no photo underneath it
+   to obscure. */
+.hero-banner-wrap { position: relative; border-radius: 20px; overflow: hidden; margin-bottom: 24px; box-shadow: var(--shadow-sm); }
+.hero-banner-media {
+  position: relative; width: 100%; height: 300px; overflow: hidden; cursor: pointer;
+  background: linear-gradient(135deg, var(--color-charcoal), #241f2b);
+  display: flex; align-items: center; justify-content: center;
+}
+.hero-banner-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.hero-banner-img-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.5); }
+.hero-banner-img-placeholder i { width: 40px; height: 40px; }
+.hero-banner-info {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  padding: 0 20px 18px; display: flex; flex-direction: column; align-items: flex-start;
+  pointer-events: none; /* only the button below needs to be clickable */
+}
+.hero-title { font-size: 20px; font-weight: 800; line-height: 1.2; margin: 0; color: var(--text-primary); }
+.hero-sub { font-size: 13.5px; font-weight: 600; color: var(--text-secondary); margin: 0; max-width: 480px; }
+.hero-cta { align-self: flex-start; margin-top: 4px; gap: 8px; pointer-events: auto; box-shadow: 0 2px 12px rgba(0,0,0,0.35); }
+.hero-dots { position: absolute; top: 12px; left: 0; right: 0; z-index: 2; display: flex; gap: 6px; justify-content: center; padding: 0; }
+.hero-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.55); box-shadow: 0 1px 3px rgba(0,0,0,0.4); border: none; padding: 0; cursor: pointer; transition: background var(--transition-fast), width var(--transition-fast); }
+.hero-dot.active { background: #fff; width: 18px; border-radius: 4px; }
+
+.hero-banner-static {
+  position: relative; border-radius: 20px; background: linear-gradient(135deg, var(--color-charcoal), #241f2b);
+  color: #fff; padding: 40px 32px; overflow: hidden; cursor: pointer; min-height: 200px;
+  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+}
+.hero-banner-static::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle at 85% 15%, rgba(255,107,0,0.35), transparent 55%);
+}
+.hero-banner-static .hero-title, .hero-banner-static .hero-sub { position: relative; z-index: 1; color: #fff; }
+.hero-banner-static .hero-sub { color: rgba(255,255,255,0.82); }
+.hero-banner-static .hero-cta { position: relative; z-index: 1; }
+.hero-banner-skeleton { height: 200px; border-radius: 20px; }
+
+/* ---------- Food category icon row ---------- */
+.category-icon-row { display: flex; gap: 14px; overflow-x: auto; padding: 2px 2px 8px; -ms-overflow-style: none; scrollbar-width: none; }
+.category-icon-row::-webkit-scrollbar { display: none; }
+.category-icon-card {
+  flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; width: 76px;
+  background: none; border: none; cursor: pointer; padding: 4px 0;
+}
+.category-icon-badge {
+  width: 60px; height: 60px; border-radius: 50%; background: var(--bg-surface-2); color: var(--color-primary);
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm);
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+.category-icon-card span:last-child { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+.category-icon-card:hover .category-icon-badge { transform: translateY(-2px); }
+.category-icon-card.active .category-icon-badge { background: var(--color-primary); color: #fff; }
+.category-icon-card.active span:last-child { color: var(--color-primary); }
+
+@media (max-width: 480px) {
+  .hero-banner-static { padding: 28px 20px; min-height: 170px; }
+  .hero-banner-static .hero-title { font-size: 26px; }
+  .hero-banner-media { height: 200px; }
+  .hero-banner-info { padding: 42px 16px 14px; }
+  .hero-banner-info .hero-title { font-size: 18px; }
+}
+
+/* ---------- Store cards (marketplace discovery) ----------
+   One shared component (storeCard() in home.js) used everywhere a shop
+   is listed — Popular Shops, All Stores, and (since those two lists are
+   just the same render call over a filtered/sorted array, not separate
+   render paths) search and category results too — so this layout
+   applies everywhere automatically. Info sits OUTSIDE/above a compact,
+   wide, short cover image (never overlaid on top of it): availability
+   line, then name + logo + favorite heart, then rating/category, then
+   the image itself, capped to a fixed aspect ratio so a portrait,
+   square or huge upload never makes one card dramatically taller than
+   its neighbors. */
+.store-card { display: flex; flex-direction: column; overflow: hidden; cursor: pointer; }
+.store-card-info { padding: 12px 14px 10px; }
+.store-card-avail { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; }
+.store-card-avail.is-open { color: var(--color-success); }
+.store-card-name-row { display: flex; align-items: center; gap: 8px; }
+.store-card-logo { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex-shrink: 0; display: block; }
+.store-card-logo-fallback { display: flex; align-items: center; justify-content: center; background: var(--bg-surface-2); color: var(--color-primary); flex-shrink: 0; }
+.store-card-name { flex: 1; min-width: 0; font-size: 15.5px; font-weight: 800; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-card-fav-btn {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; border: none; background: none;
+  color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.store-card-fav-btn i, .store-card-fav-btn svg { width: 18px; height: 18px; }
+.store-card-fav-btn.active { color: var(--color-error); }
+.store-card-rating-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; margin-top: 3px; }
+.store-card-rating-row .dot { opacity: 0.5; font-weight: 400; }
+
+.store-card-cover { position: relative; aspect-ratio: 16/7; background: var(--bg-surface-2); margin: 0 14px 14px; border-radius: var(--radius-md); overflow: hidden; }
+.store-card-cover-img-wrap { width: 100%; height: 100%; overflow: hidden; }
+.store-card-cover-img-wrap img { width: 100%; height: 100%; object-fit: cover; transition: transform var(--transition-med); }
+.store-card:hover .store-card-cover-img-wrap img { transform: scale(1.05); }
+.store-card-cover-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+.store-card-status { position: absolute; top: 8px; left: 8px; z-index: 2; }
+
+@media (max-width: 480px) {
+  .store-card-info { padding: 10px 12px 8px; }
+  .store-card-name { font-size: 14.5px; }
+  .store-card-cover { margin: 0 12px 12px; }
+}
+
+/* ---------- Shop page (redesigned, modern food-delivery layout) ----------
+   Structure: full-bleed banner with floating back/search buttons -> a
+   compact info block (name, rating, delivery fee, prep time, open/closed,
+   location) -> a horizontally-scrolling category nav that smooth-scrolls
+   to a section further down (no page reload, no state re-render — plain
+   scrollIntoView, same "direct DOM, skip the framework" pattern already
+   used by the hero's dots/hero-scroll) -> a horizontal "Most Liked" row
+   -> one 2-column grid per real category, each its own section the nav
+   can jump to. Category names, counts and which items are "most liked"
+   all come from real menu_items data (category field, rating_count) —
+   nothing here is hard-coded to any one shop. */
+.store-detail { position: relative; }
+/* Full-bleed, edge to edge — same design language as the homepage's
+   dark topbar (css above): a full-width "background" element the curved
+   white sheet then rises up out of, so opening a shop feels like a
+   continuation of the same app, not a different screen. Uses the same
+   100vw/-50vw trick, so it works the same regardless of which padded
+   ancestor wraps it (.home-content for guests, .page-wrap for signed-in
+   customers). */
+.shop-hero {
+  position: relative; left: 50%; right: 50%; width: 100vw; margin-left: -50vw; margin-right: -50vw;
+  margin-top: -20px;
+  aspect-ratio: 16/8; overflow: hidden; background: var(--bg-surface-2);
+}
+.shop-hero img { width: 100%; height: 100%; object-fit: cover; }
+.shop-hero-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+.shop-hero-actions { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; gap: 8px; z-index: 2; }
+.shop-hero-actions-right { display: flex; gap: 8px; }
+.shop-hero-icon-btn {
+  width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer; flex-shrink: 0;
+  background: rgba(20,18,16,0.55); color: #fff; display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.shop-hero-icon-btn:hover { background: rgba(20,18,16,0.75); }
+.shop-hero-icon-btn.active { color: var(--color-error); }
+.shop-hero-icon-btn.active i, .shop-hero-icon-btn.active svg { fill: currentColor; }
+
+/* ---------- Three-dot bottom sheet ---------- */
+.modal-overlay.sheet { align-items: flex-end; padding: 0; }
+.modal.sheet-panel {
+  max-width: 600px; width: 100%; border-radius: 20px 20px 0 0; max-height: 85vh;
+  animation: sheetUp var(--transition-med);
+}
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: var(--border-strong); margin: 10px auto 2px; }
+.sheet-item {
+  display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px 20px; border: none; background: none;
+  text-align: left; cursor: pointer; color: var(--text-primary); border-bottom: 1px solid var(--border-color);
+}
+.sheet-item:last-child { border-bottom: none; }
+.sheet-item:active { background: var(--bg-surface-2); }
+.sheet-item i, .sheet-item svg { width: 20px; height: 20px; color: var(--text-secondary); flex-shrink: 0; }
+.sheet-item.active-fav i, .sheet-item.active-fav svg { color: var(--color-error); fill: currentColor; }
+.sheet-item-label { font-size: 15px; font-weight: 600; }
+.sheet-item-sub { font-size: 12.5px; color: var(--text-secondary); font-weight: 400; margin-top: 2px; }
+
+.store-info-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border-color); gap: 12px; }
+.store-info-row:last-child { border-bottom: none; }
+.store-info-row-label { color: var(--text-secondary); font-size: 13.5px; flex-shrink: 0; }
+.store-info-row-value { font-size: 13.5px; font-weight: 600; text-align: right; }
+
+/* .storefront-curved (the white sheet this card sits inside) already
+   contributes 22px/18px of its own top padding above this card — this
+   used to ALSO add its own 14px top padding on top of that, stacking
+   to ~36px of dead space before the logo/name row. Left/bottom padding
+   stay (this card has no side padding of its own elsewhere to fall
+   back on), only the redundant top value is trimmed. */
+.shop-info-card { padding: 0 0 4px; }
+.shop-info-name-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.shop-info-logo { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--bg-surface); box-shadow: var(--shadow-sm); }
+.shop-info-name { font-size: 21px; font-weight: 800; margin: 0; line-height: 1.2; }
+.shop-info-meta-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: 13px; color: var(--text-secondary); }
+.shop-info-meta-row .dot { opacity: 0.5; }
+.shop-info-rating { display: flex; align-items: center; gap: 4px; font-weight: 700; color: var(--text-primary); }
+.shop-info-location { display: flex; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.shop-info-badges { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.shop-fulfil-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--text-secondary); background: var(--bg-surface-2); border-radius: 999px; padding: 5px 10px; }
+
+/* Horizontally-scrolling category nav — tapping a chip scrolls the page
+   to that category's section further down; the active chip (whichever
+   section is currently in view) is toggled by a plain IntersectionObserver
+   directly on the DOM, never through a full app re-render, so scrolling
+   the menu never re-renders the whole page just to update a highlight. */
+.shop-cat-nav { display: flex; gap: 8px; overflow-x: auto; padding: 12px 2px 10px; -ms-overflow-style: none; scrollbar-width: none; }
+.shop-cat-nav::-webkit-scrollbar { display: none; }
+.shop-cat-chip {
+  flex: 0 0 auto; padding: 8px 16px; border-radius: 999px; border: 1px solid var(--border-color);
+  background: var(--bg-surface); color: var(--text-secondary); font-size: 13.5px; font-weight: 600; cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.shop-cat-chip.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+
+.shop-section { scroll-margin-top: 12px; margin-bottom: 20px; }
+.shop-section-title { font-size: 16px; font-weight: 800; margin: 0 0 10px; }
+
+.shop-popular-row { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 10px; -ms-overflow-style: none; scrollbar-width: none; }
+.shop-popular-row::-webkit-scrollbar { display: none; }
+.shop-popular-row .shop-prod-card { flex: 0 0 auto; width: 140px; }
+
+.shop-menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@media (min-width: 620px) { .shop-menu-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 900px) { .shop-menu-grid { grid-template-columns: repeat(4, 1fr); } }
+
+/* Product card: compact, contained (never cropped) image over a light
+   background, name/price/rating below, a round "+" that quick-adds to
+   the existing cart exactly like the rest of the app (same store-quick-add
+   action) — tapping the card body (not the button) opens the existing
+   product detail/add-ons modal, unchanged. */
+.shop-prod-card { display: flex; flex-direction: column; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; cursor: pointer; }
+.shop-prod-img { position: relative; aspect-ratio: 1/1; background: #fff; display: flex; align-items: center; justify-content: center; }
+.shop-prod-img img { width: 100%; height: 100%; object-fit: contain; padding: 8px; }
+.shop-prod-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 3px; }
+.shop-prod-name { font-size: 13px; font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 2.5em; }
+.shop-prod-rating { font-size: 11.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; }
+.shop-prod-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.shop-prod-price { font-size: 14.5px; font-weight: 800; color: var(--color-primary); }
+.shop-prod-add {
+  width: 28px; height: 28px; border-radius: 50%; border: none; background: var(--color-primary); color: #fff;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+.shop-prod-add:hover { transform: scale(1.08); }
+.shop-prod-add:disabled { background: var(--border-strong); cursor: not-allowed; }
+.shop-prod-add i, .shop-prod-add svg { width: 15px; height: 15px; }
+.shop-prod-img .out-of-stock-overlay { font-size: 11px; }
+
+@media (max-width: 480px) {
+  .shop-hero { aspect-ratio: 16/9; }
+  .shop-info-name { font-size: 19px; }
+}
+
+/* ---------- Location selector ---------- */
+.location-select-row { display: flex; align-items: center; gap: 8px; }
+.location-select { border: none; background: transparent; padding: 4px 0; min-height: auto; font-weight: 600; font-size: 13.5px; color: var(--text-primary); }
+.location-select:focus { box-shadow: none; outline: none; }
+
+/* ---------- Reorder row ("Order it again") ---------- */
+.reorder-row {
+  display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px;
+  -ms-overflow-style: none; scrollbar-width: none;
+}
+.reorder-row::-webkit-scrollbar { display: none; }
+.reorder-card { flex: 0 0 auto; width: 150px; cursor: pointer; overflow: hidden; }
+.reorder-card-img-wrap { aspect-ratio: 4/3; background: var(--bg-surface-2); overflow: hidden; }
+.reorder-card-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ---------- "Recommended for You" row — horizontal scroll only here;
+   .menu-card elsewhere (e.g. a store's own menu grid) is untouched
+   since these rules are scoped under .recommended-row. ---------- */
+.recommended-row {
+  display: flex; gap: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity; padding: 2px 2px 10px;
+  -ms-overflow-style: none; scrollbar-width: none;
+}
+.recommended-row::-webkit-scrollbar { display: none; }
+.recommended-row .menu-card { flex: 0 0 auto; width: 62vw; max-width: 210px; scroll-snap-align: start; }
+@media (min-width: 481px) { .recommended-row .menu-card { width: 200px; } }
+
+/* ---------- Floating cart bar (mobile-first, visible on store pages) ---------- */
+.floating-cart-btn {
+  position: fixed; left: 16px; right: 16px; z-index: 350;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  background: var(--color-primary); color: #fff; border: none; border-radius: var(--radius-pill);
+  padding: 15px 20px; font-weight: 700; font-size: 14px; box-shadow: var(--shadow-lg);
+  display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;
+  max-width: 480px; margin: 0 auto;
+}
+/* Only a logged-in customer ever sees a bottom nav (guests get none), so
+   only then does the cart bar need to stack above it instead of the
+   screen edge — see updateFixedBottomSpace() in app.js for the matching
+   reserved content padding. */
+body.has-bottomnav .floating-cart-btn { bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px) + 12px); }
+@media (min-width: 761px) {
+  .floating-cart-btn, body.has-bottomnav .floating-cart-btn { bottom: calc(env(safe-area-inset-bottom, 0px) + 24px); }
+}
+
+/* ---------- Food cards ---------- */
+.home-food-card { display: flex; flex-direction: column; overflow: hidden; }
+.home-food-img-wrap { position: relative; aspect-ratio: 4/3; background: var(--bg-surface-2); overflow: hidden; }
+.home-food-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.home-food-img-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+.home-food-img-fallback [data-lucide] { width: 34px; height: 34px; }
+.home-food-cat { position: absolute; top: 10px; left: 10px; }
+.home-food-desc {
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  min-height: 2.6em;
+}
+
+/* ---------- Offers ---------- */
+.home-offer-card { border-left: 4px solid var(--color-primary); }
+.home-offer-icon {
+  width: 46px; height: 46px; border-radius: 50%; background: rgba(255,107,0,0.14); color: var(--color-primary);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+
+/* ---------- Footer ---------- */
+.home-footer { background: var(--color-charcoal); color: #E9E8ED; margin-top: 20px; }
+.home-footer .home-brand { color: #fff; }
+.home-footer-grid {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 28px; padding: 44px 20px 28px;
+}
+.home-footer-grid-single { grid-template-columns: 1fr; max-width: 420px; padding: 32px 20px; }
+.home-footer-links { display: flex; flex-direction: column; gap: 9px; }
+.home-footer-links a { color: #C9C7D1; text-decoration: none; font-size: 13.5px; cursor: pointer; }
+.home-footer-links a:hover { color: #fff; }
+.home-footer-bottom {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+  padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.12); color: #B6B4C0;
+}
+.home-footer-legal { display: flex; gap: 18px; }
+.home-footer-legal a { color: #B6B4C0; text-decoration: none; cursor: pointer; }
+.home-footer-legal a:hover { color: #fff; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .home-footer-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 760px) {
+  .home-header-inner { flex-wrap: wrap; padding: 10px 14px; gap: 10px; }
+}
+
+@media (max-width: 480px) {
+  .home-brand-name { font-size: 16px; }
+  .home-header-actions { gap: 6px; }
+  .home-header-actions .btn-icon { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; }
+  .home-header-actions .btn-sm { padding: 7px 10px; font-size: 12px; min-height: 30px; }
+  .home-login-btn { display: none; }
+  .home-footer-grid { grid-template-columns: 1fr; padding: 32px 16px 20px; }
+  .home-footer-bottom { flex-direction: column; align-items: flex-start; }
+}

@@ -1,0 +1,262 @@
+/* ============================================================
+   CLICKFUD — BASE STYLES: reset, tokens, typography, buttons, forms, cards, badges, skeletons
+   ============================================================ */
+
+:root {
+  --color-primary: #FF6B00;
+  --color-primary-dark: #E05F00;
+  --color-primary-light: #FFB366;
+  --color-charcoal: #1E1E24;
+  --color-offwhite: #FAF9F6;
+  --color-yellow: #FFC107;
+  --color-success: #22C55E;
+  --color-error: #EF4444;
+  --color-gray: #6B7280;
+
+  --bg-body: var(--color-offwhite);
+  --bg-surface: #FFFFFF;
+  --bg-surface-2: #F4F3F0;
+  --bg-elevated: #FFFFFF;
+  --text-primary: #1E1E24;
+  --text-secondary: #6B7280;
+  --text-inverse: #FFFFFF;
+  --border-color: #E7E5E1;
+  --border-strong: #D7D4CE;
+  --shadow-sm: 0 1px 2px rgba(30,30,36,0.06);
+  --shadow-md: 0 4px 14px rgba(30,30,36,0.08);
+  --shadow-lg: 0 12px 32px rgba(30,30,36,0.14);
+  --overlay: rgba(20,20,24,0.5);
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --nav-h: 64px;
+  --bottomnav-h: 64px;
+  --sidebar-w: 220px;
+
+  --transition-fast: 140ms ease;
+  --transition-med: 220ms ease;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-body: #17171B;
+  --bg-surface: #1E1E24;
+  --bg-surface-2: #26262E;
+  --bg-elevated: #2A2A33;
+  --text-primary: #F5F4F2;
+  --text-secondary: #A4A3AC;
+  --text-inverse: #1E1E24;
+  --border-color: #35353F;
+  --border-strong: #43434F;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 14px rgba(0,0,0,0.35);
+  --shadow-lg: 0 16px 40px rgba(0,0,0,0.5);
+  --overlay: rgba(0,0,0,0.65);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-body: #17171B;
+    --bg-surface: #1E1E24;
+    --bg-surface-2: #26262E;
+    --bg-elevated: #2A2A33;
+    --text-primary: #F5F4F2;
+    --text-secondary: #A4A3AC;
+    --text-inverse: #1E1E24;
+    --border-color: #35353F;
+    --border-strong: #43434F;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 14px rgba(0,0,0,0.35);
+    --shadow-lg: 0 16px 40px rgba(0,0,0,0.5);
+    --overlay: rgba(0,0,0,0.65);
+  }
+}
+
+* , *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+/* "manipulation" is the standard value for exactly this: it disables the
+   pinch-zoom and double-tap-zoom gestures while leaving normal one-finger
+   panning/scrolling (vertical AND horizontal, e.g. the food-category and
+   store-promo rows) and ordinary taps completely untouched — unlike
+   touch-action:none, it never blocks scroll. Backs up the viewport meta
+   tag's user-scalable=no/maximum-scale=1, which some mobile browsers
+   don't fully honor for double-tap zoom on their own. */
+html, body { touch-action: manipulation; }
+/* Safety net for the homepage's full-bleed curved container (css/home.css
+   .storefront-topbar/.storefront-curved), which intentionally breaks out
+   to 100vw from inside a padded/centered ancestor — 100vw can exceed the
+   real visible width by a scrollbar's worth of pixels in some browsers,
+   which would otherwise show as a few pixels of horizontal scroll. */
+html, body { overflow-x: hidden; }
+body {
+  margin: 0;
+  background: var(--bg-body);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--transition-med), color var(--transition-med);
+  padding-top: var(--nav-h);
+}
+/* Not on body: with html/body pinned to height:100%, a border-box body's own bottom padding doesn't extend real scroll height (confirmed quirk) — #app has no fixed height, so it does. */
+#app { padding-bottom: var(--fixed-bottom-space, 0px); }
+/* Public homepage supplies its own (sticky, in-flow) header instead of the
+   fixed .app-nav, so no reserved top padding is needed for it. */
+body.no-app-nav { padding-top: 0; }
+
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+button { font-family: inherit; }
+h1,h2,h3,h4,p { margin: 0; }
+ul { margin: 0; padding: 0; list-style: none; }
+
+/* focus visibility for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Layout helpers ---------- */
+.container { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+.grid { display: grid; gap: 16px; }
+.grid-menu { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.flex { display: flex; }
+.flex-col { display: flex; flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: 4px; } .gap-2 { gap: 8px; } .gap-3 { gap: 12px; } .gap-4 { gap: 16px; }
+.mt-1{margin-top:4px;} .mt-2{margin-top:8px;} .mt-3{margin-top:12px;} .mt-4{margin-top:16px;} .mt-6{margin-top:24px;}
+.mb-1{margin-bottom:4px;} .mb-2{margin-bottom:8px;} .mb-3{margin-bottom:12px;} .mb-4{margin-bottom:16px;}
+.text-sm { font-size: 13px; } .text-xs{font-size:11px;} .text-lg{font-size:18px;} .text-xl{font-size:22px;}
+.text-muted { color: var(--text-secondary); }
+.text-primary-c { color: var(--color-primary); }
+
+/* Full-screen, fixed overlay — not an in-flow block inside #app — so it
+   covers the entire viewport (nav bars included) regardless of device
+   size/aspect ratio, with the logo centered via flexbox (never fixed
+   coordinates, so re-centering is automatic on any screen). 100dvh
+   handles mobile browser chrome (address bar show/hide) correctly,
+   falling back to 100vh where dvh isn't supported. Shown only while
+   !authReady (js/app.js) — once that flips true, this element is simply
+   never rendered again, and the fade-in below plays once per app launch. */
+.splash-screen {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; z-index: 5000;
+  background: var(--bg-body); display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 40px 20px; animation: splashFadeIn 220ms ease;
+}
+@keyframes splashFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.ce-logo-badge svg { display: block; }
+.text-success { color: var(--color-success); }
+.text-error { color: var(--color-error); }
+.font-bold { font-weight: 700; } .font-semibold { font-weight: 600; }
+.w-full { width: 100%; }
+.hidden { display: none !important; }
+.section-title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.divider { height: 1px; background: var(--border-color); border: none; margin: 16px 0; }
+
+/* ---------- Typography scale ---------- */
+.page-title { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: none; cursor: pointer; font-weight: 600; font-size: 14px;
+  border-radius: var(--radius-md); padding: 12px 20px; min-height: 44px;
+  transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+  white-space: nowrap;
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--color-primary); color: #fff; box-shadow: var(--shadow-sm); }
+.btn-primary:hover:not(:disabled) { background: var(--color-primary-dark); box-shadow: var(--shadow-md); }
+.btn-secondary { background: var(--bg-surface-2); color: var(--text-primary); border: 1px solid var(--border-color); }
+.btn-secondary:hover:not(:disabled) { background: var(--border-color); }
+.btn-success { background: var(--color-success); color: #fff; }
+.btn-danger { background: var(--color-error); color: #fff; }
+.btn-ghost { background: transparent; color: var(--text-primary); }
+.btn-ghost:hover { background: var(--bg-surface-2); }
+.btn-sm { padding: 8px 14px; min-height: 34px; font-size: 13px; border-radius: var(--radius-sm); }
+.btn-lg { padding: 15px 26px; font-size: 16px; }
+.btn-block { width: 100%; }
+.btn-icon { padding: 10px; min-width: 40px; min-height: 40px; border-radius: var(--radius-pill); background: var(--bg-surface-2); color: var(--text-primary); border: 1px solid var(--border-color); }
+.btn-icon:hover { background: var(--border-color); }
+.btn-loading { position: relative; color: transparent !important; pointer-events: none; }
+.btn-loading::after {
+  content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.5); border-top-color: #fff; animation: spin 0.7s linear infinite;
+}
+.btn-secondary.btn-loading::after, .btn-ghost.btn-loading::after { border-color: rgba(30,30,36,0.25); border-top-color: var(--text-primary); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Forms ---------- */
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.field label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.input, .select, textarea.input {
+  width: 100%; padding: 12px 14px; border-radius: var(--radius-sm); border: 1.5px solid var(--border-color);
+  background: var(--bg-surface); color: var(--text-primary); font-size: 14px; min-height: 44px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.input:focus, .select:focus, textarea.input:focus {
+  border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(255,107,0,0.15); outline: none;
+}
+.input.has-error { border-color: var(--color-error); }
+.field-error { font-size: 12px; color: var(--color-error); }
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.input-group { display: flex; align-items: center; border: 1.5px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface); padding: 0 12px; }
+.input-group input { border: none; background: transparent; min-height: 44px; flex: 1; }
+.input-group input:focus { outline: none; box-shadow: none; }
+.input-group-btn { background: none; border: none; padding: 6px; margin: 0 -4px 0 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); flex-shrink: 0; }
+.input-group-btn:hover { color: var(--text-primary); }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--bg-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color); transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+.card-pad { padding: 18px; }
+.card-hover:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.card-hover:active { transform: scale(0.98); }
+
+/* ---------- Image fade-in (lazy-loaded photos) ---------- */
+.fade-img { opacity: 0; transition: opacity 280ms ease; }
+.fade-img.loaded { opacity: 1; }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700;
+  padding: 4px 10px; border-radius: var(--radius-pill); text-transform: uppercase; letter-spacing: 0.03em;
+}
+.badge-primary { background: rgba(255,107,0,0.14); color: var(--color-primary-dark); }
+.badge-yellow { background: rgba(255,193,7,0.22); color: #8a6400; }
+.badge-success { background: rgba(34,197,94,0.15); color: #157a41; }
+.badge-error { background: rgba(239,68,68,0.14); color: #b91c1c; }
+.badge-gray { background: var(--bg-surface-2); color: var(--text-secondary); border: 1px solid var(--border-color); }
+:root[data-theme="dark"] .badge-yellow { color: #FFC107; }
+:root[data-theme="dark"] .badge-success { color: #4ade80; }
+:root[data-theme="dark"] .badge-error { color: #f87171; }
+
+/* ---------- Skeletons ---------- */
+.skeleton { background: linear-gradient(90deg, var(--bg-surface-2) 25%, var(--border-color) 37%, var(--bg-surface-2) 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius: var(--radius-sm); }
+@keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+/* ---------- Empty states ---------- */
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 20px; color: var(--text-secondary); gap: 10px; }
+.empty-state .icon-wrap { width: 64px; height: 64px; border-radius: 50%; background: var(--bg-surface-2); display: flex; align-items: center; justify-content: center; color: var(--color-primary); margin-bottom: 6px; }
+.empty-state h3 { color: var(--text-primary); font-size: 16px; }
+
+/* ---------- Scrollbars (light touch) ---------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+
+/* Utility for icon sizing via lucide */
+[data-lucide] { width: 1em; height: 1em; }
+svg.lucide { display: inline-block; vertical-align: -2px; }
