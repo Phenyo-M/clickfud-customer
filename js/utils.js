@@ -10,6 +10,16 @@ App.Utils = (function () {
     return 'R' + v.toFixed(2);
   }
 
+  // The one customer-facing price for a menu item — shop price plus the
+  // developer's own per-item platform fee (set at menu approval; see
+  // migration_governance.sql section 41). Every place a menu item's price
+  // is shown to or charged from a customer goes through this, so it can
+  // never drift from what paystack-initialize/paystack-charge-saved/
+  // orders.js actually charge server-side.
+  function menuItemPrice(item) {
+    return Math.round((Number(item?.price || 0) + Number(item?.platform_fee_amount || 0)) * 100) / 100;
+  }
+
   function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     return String(str)
@@ -69,6 +79,18 @@ App.Utils = (function () {
 
   function isValidEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+  }
+
+  // Customer sign-up helpers — for instant feedback only; the server
+  // (supabase/up_student_auth.sql) makes the real decision.
+  function isUpStudentEmail(email) {
+    const e = String(email || '').trim().toLowerCase();
+    return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e) && e.split('@')[1] === String(App.CONFIG.UP_STUDENT_EMAIL_DOMAIN).toLowerCase();
+  }
+  // "U12345678", "12345678", "u1234 5678" -> "u12345678"; null if not 8 digits.
+  function normalizeStudentNumber(value) {
+    const digits = String(value || '').replace(/[^0-9]/g, '');
+    return /^[0-9]{8}$/.test(digits) && /^\s*u?\s*[0-9\s]+$/i.test(String(value || '')) ? 'u' + digits : null;
   }
 
   function isValidPhone(phone) {
@@ -143,9 +165,39 @@ App.Utils = (function () {
     return Object.keys(obj).filter(k => obj[k] !== undefined && obj[k] !== null).map(k => `${encodeURIComponent(k)}=${encodeURIComponent(obj[k])}`).join('&');
   }
 
+  // Real browser Speech Recognition (no external service, no key) — used
+  // by the home page's search mic button. The button itself is only
+  // ever rendered when this returns true, so there's no dead/fake mic
+  // icon shown on browsers that don't support it (mainly desktop
+  // Firefox as of this writing).
+  function speechRecognitionSupported() {
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  }
+
+  // opts: { onResult(transcript), onError(), onEnd() } — a single
+  // one-shot listen, not continuous dictation.
+  function startVoiceSearch(opts) {
+    opts = opts || {};
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) { if (opts.onError) opts.onError('not_supported'); return null; }
+    const rec = new Recognition();
+    rec.lang = 'en-ZA';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e) => {
+      const transcript = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
+      if (opts.onResult) opts.onResult(transcript);
+    };
+    rec.onerror = () => { if (opts.onError) opts.onError('recognition_failed'); };
+    rec.onend = () => { if (opts.onEnd) opts.onEnd(); };
+    rec.start();
+    return rec;
+  }
+
   return {
-    money, escapeHtml, sanitizeText, formatDate, formatTime, formatDateTime, timeAgo,
-    minutesUntil, debounce, isValidEmail, isValidPhone, isValidPrice, isValidQty,
+    money, menuItemPrice, escapeHtml, sanitizeText, formatDate, formatTime, formatDateTime, timeAgo,
+    minutesUntil, debounce, isValidEmail, isUpStudentEmail, normalizeStudentNumber, isValidPhone, isValidPrice, isValidQty,
     initials, uid, clamp, starIcons, qs, validatePassword,
+    speechRecognitionSupported, startVoiceSearch,
   };
 })();

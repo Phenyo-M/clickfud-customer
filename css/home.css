@@ -11,23 +11,30 @@
    line under the header. */
 .home-header {
   position: sticky; top: 0; z-index: 300;
-  background: #000; border-bottom: none; box-shadow: var(--shadow-sm);
+  background: rgba(10,10,12,0.86); border-bottom: none; box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
 }
 .home-header-inner {
   display: flex; align-items: center; gap: 18px; padding: 14px 20px;
 }
 .home-brand {
   display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text-primary);
-  font-weight: 800; font-size: 19px; white-space: nowrap; cursor: pointer; flex-shrink: 0;
+  font-weight: 700; font-size: 19px; white-space: nowrap; cursor: pointer; flex-shrink: 0;
 }
+.mhome-brand-tag > span { display: flex; flex-direction: column; line-height: 1.1; }
+.mhome-tagline { font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.6); letter-spacing: 0.02em; }
+@media (max-width: 480px) { .mhome-tagline { display: none; } }
 .home-brand-name { color: var(--color-primary); }
 .home-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; }
-.home-cart-btn { position: relative; }
-.home-cart-badge {
-  position: absolute; top: 2px; right: 2px; background: var(--color-error); color: #fff; font-size: 10px;
-  min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
-  font-weight: 700; padding: 0 3px; border: 2px solid var(--bg-surface);
-}
+
+/* In-header nav links (marketing homepage only) — a real single-row
+   header (logo | links | actions), distinct from .home-public-nav
+   above (a separate secondary bar, unused by the current design). */
+.mnav-links { display: flex; align-items: center; gap: 22px; margin: 0 auto; }
+.mnav-links a { color: rgba(255,255,255,0.82); font-size: 13.5px; font-weight: 600; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.mnav-links a:hover { color: var(--color-primary); }
+@media (max-width: 880px) { .mnav-links { display: none; } }
+@media (max-width: 560px) { .mnav-order-btn span { display: none; } }
 
 /* ---------- Public nav row ---------- */
 .home-public-nav { background: var(--bg-surface-2); border-bottom: 1px solid var(--border-color); overflow-x: auto; }
@@ -42,7 +49,7 @@
 .home-section, #home-top { scroll-margin-top: 90px; }
 
 /* ---------- Page content wrapper ---------- */
-.home-content { padding: 20px 20px 48px; }
+.home-content { --content-pad-x: 20px; padding: 20px 20px 48px; }
 .storefront { max-width: 100%; }
 
 /* ---------- Homepage: topbar + large curved content sheet ----------
@@ -58,75 +65,53 @@
    large panel everything else lives inside, not a rounded card for
    every section. Both break out of whatever padded/centered ancestor
    wraps them (.home-content for guests, .page-wrap for signed-in
-   customers — different padding values in each) using the standard
-   "100vw + -50vw margin" full-bleed trick, which works the same
-   regardless of the ancestor's own padding; the small negative top/
-   bottom margins below cancel that ancestor's vertical padding
-   specifically so the topbar sits flush under the sticky header and the
-   sheet's rounded top is what's actually visible on load. */
+   customers — different padding values in each) by cancelling that
+   ancestor's own left/right padding via --content-pad-x (set on
+   .home-content/.page-wrap), rather than the viewport-relative
+   "100vw + -50vw margin" trick — that trick assumes the ancestor chain
+   is centered/flush with the true browser viewport, which breaks (bleeds
+   under, and cuts off against) the fixed desktop sidebar (body.has-sidebar,
+   components.css) since the sidebar offsets #app from the real viewport
+   edge. Cancelling the immediate parent's padding instead is offset-
+   agnostic — it works the same whether or not a sidebar (or anything
+   else) shifts the ancestor chain. The small negative top/bottom margins
+   below cancel that ancestor's vertical padding specifically so the
+   topbar sits flush under the sticky header and the sheet's rounded top
+   is what's actually visible on load. */
 .storefront-topbar {
-  position: relative; left: 50%; right: 50%; width: 100vw; margin-left: -50vw; margin-right: -50vw;
+  position: relative;
+  width: calc(100% + var(--content-pad-x, 20px) * 2);
+  margin-left: calc(var(--content-pad-x, 20px) * -1);
+  margin-right: calc(var(--content-pad-x, 20px) * -1);
   margin-top: -20px;
   /* Solid black — deliberately the strongest possible contrast against
      the white curved sheet below, so the large rounded top corners read
-     as an obvious curved shape rising off it, not a subtle tone shift.
-     Once a Top Advert is published, .storefront-topbar-media (below)
-     covers this in a full-bleed photo instead — no decorative filler
-     around it, the real advert image fills the space directly. */
+     as an obvious curved shape rising off it, not a subtle tone shift. */
   background: #000;
   color: #fff; padding: 0; display: flex; flex-direction: column; gap: 10px;
   overflow: hidden;
-}
-/* When a Top Advert exists, its image/video is this absolutely
-   positioned full-bleed layer (z-index:0) filling the ENTIRE topbar
-   edge to edge — not a separate inset card with black space around
-   it. .storefront-topbar itself carries no padding (it would keep the
-   image from reaching the true edges, since inset:0 is measured from
-   the padding box) — the padding that used to live there moved onto
-   .storefront-topbar-pills/.storefront-advert-caption below instead,
-   so the photo can bleed all the way out while the pills/caption text
-   still keep their own inset from the edges as an overlay on top of
-   it. */
-.storefront-topbar.has-media { aspect-ratio: 2.6 / 1; justify-content: space-between; }
-.storefront-topbar-media { position: absolute; inset: 0; z-index: 0; }
-.storefront-topbar-media img, .storefront-topbar-media video {
-  display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
 }
 .storefront-topbar-pills {
   position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 14px 20px 16px;
 }
-/* A caption after the pills (only rendered when the advert has a
-   title/promo_text) takes over the bottom padding instead, so the two
-   don't stack into a bigger gap than .storefront-topbar's gap:10px
-   already provides between them. */
-.storefront-topbar-pills:not(:last-child) { padding-bottom: 0; }
-/* Smaller than before on purpose — same pill, less prominent over the
-   advert photo. */
 .storefront-topbar-pickup {
   display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; color: #fff;
   background: var(--color-primary); padding: 4px 9px; border-radius: 999px; white-space: nowrap;
 }
-.storefront-topbar-eta { font-size: 10px; font-weight: 800; color: #fff; background: var(--color-primary); padding: 4px 9px; border-radius: 999px; white-space: nowrap; }
-
-/* Optional caption for the Top Advert (js/top-advert.js, schema.sql
-   section 28) — sits in normal flex flow above .storefront-topbar-media
-   (z-index:1, same as the pills), so it overlays the bottom of the
-   photo. text-shadow (not a dark background panel) keeps it readable
-   over a busy image without adding any extra dark/decorative block. */
-.storefront-advert-caption { position: relative; z-index: 1; padding: 0 20px 16px; }
-.storefront-advert-title { font-size: 14px; font-weight: 800; color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,0.65); }
-.storefront-advert-sub { font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.9); margin-top: 2px; text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
+.storefront-topbar-eta { font-size: 10px; font-weight: 600; color: #fff; background: var(--color-primary); padding: 4px 9px; border-radius: 999px; white-space: nowrap; }
 
 .storefront-curved {
-  position: relative; left: 50%; right: 50%; width: 100vw; margin-left: -50vw; margin-right: -50vw;
+  position: relative;
+  width: calc(100% + var(--content-pad-x, 20px) * 2);
+  margin-left: calc(var(--content-pad-x, 20px) * -1);
+  margin-right: calc(var(--content-pad-x, 20px) * -1);
   margin-top: -8px; margin-bottom: -48px;
   background: var(--bg-surface); border-radius: 32px 32px 0 0;
   padding: 22px 20px 40px;
 }
 @media (max-width: 480px) {
   .storefront-topbar-pills { padding: 12px 16px 14px; }
-  .storefront-advert-caption { padding: 0 16px 14px; }
   .storefront-curved { border-radius: 26px 26px 0 0; padding: 18px 16px 32px; margin-bottom: -40px; }
 }
 
@@ -198,7 +183,7 @@
   padding: 0 20px 18px; display: flex; flex-direction: column; align-items: flex-start;
   pointer-events: none; /* only the button below needs to be clickable */
 }
-.hero-title { font-size: 20px; font-weight: 800; line-height: 1.2; margin: 0; color: var(--text-primary); }
+.hero-title { font-size: 20px; font-weight: 700; line-height: 1.2; margin: 0; color: var(--text-primary); }
 .hero-sub { font-size: 13.5px; font-weight: 600; color: var(--text-secondary); margin: 0; max-width: 480px; }
 .hero-cta { align-self: flex-start; margin-top: 4px; gap: 8px; pointer-events: auto; box-shadow: 0 2px 12px rgba(0,0,0,0.35); }
 .hero-dots { position: absolute; top: 12px; left: 0; right: 0; z-index: 2; display: flex; gap: 6px; justify-content: center; padding: 0; }
@@ -233,8 +218,12 @@
 }
 .category-icon-card span:last-child { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
 .category-icon-card:hover .category-icon-badge { transform: translateY(-2px); }
-.category-icon-card.active .category-icon-badge { background: var(--color-primary); color: #fff; }
-.category-icon-card.active span:last-child { color: var(--color-primary); }
+.category-icon-card.active .category-icon-badge { background: var(--color-primary); color: #fff; box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.category-icon-card.active span:last-child { color: var(--color-primary); position: relative; padding-bottom: 4px; }
+.category-icon-card.active span:last-child::after {
+  content: ''; position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: 16px; height: 2px; border-radius: 2px; background: var(--color-primary);
+}
 
 @media (max-width: 480px) {
   .hero-banner-static { padding: 28px 20px; min-height: 170px; }
@@ -262,7 +251,7 @@
 .store-card-name-row { display: flex; align-items: center; gap: 8px; }
 .store-card-logo { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex-shrink: 0; display: block; }
 .store-card-logo-fallback { display: flex; align-items: center; justify-content: center; background: var(--bg-surface-2); color: var(--color-primary); flex-shrink: 0; }
-.store-card-name { flex: 1; min-width: 0; font-size: 15.5px; font-weight: 800; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-card-name { flex: 1; min-width: 0; font-size: 15.5px; font-weight: 700; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .store-card-fav-btn {
   flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; border: none; background: none;
   color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer;
@@ -301,11 +290,15 @@
    dark topbar (css above): a full-width "background" element the curved
    white sheet then rises up out of, so opening a shop feels like a
    continuation of the same app, not a different screen. Uses the same
-   100vw/-50vw trick, so it works the same regardless of which padded
+   --content-pad-x cancel-the-parent's-padding trick as .storefront-topbar
+   above (sidebar-safe), so it works the same regardless of which padded
    ancestor wraps it (.home-content for guests, .page-wrap for signed-in
    customers). */
 .shop-hero {
-  position: relative; left: 50%; right: 50%; width: 100vw; margin-left: -50vw; margin-right: -50vw;
+  position: relative;
+  width: calc(100% + var(--content-pad-x, 20px) * 2);
+  margin-left: calc(var(--content-pad-x, 20px) * -1);
+  margin-right: calc(var(--content-pad-x, 20px) * -1);
   margin-top: -20px;
   aspect-ratio: 16/8; overflow: hidden; background: var(--bg-surface-2);
 }
@@ -355,7 +348,7 @@
 .shop-info-card { padding: 0 0 4px; }
 .shop-info-name-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .shop-info-logo { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--bg-surface); box-shadow: var(--shadow-sm); }
-.shop-info-name { font-size: 21px; font-weight: 800; margin: 0; line-height: 1.2; }
+.shop-info-name { font-size: 21px; font-weight: 700; margin: 0; line-height: 1.2; }
 .shop-info-meta-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: 13px; color: var(--text-secondary); }
 .shop-info-meta-row .dot { opacity: 0.5; }
 .shop-info-rating { display: flex; align-items: center; gap: 4px; font-weight: 700; color: var(--text-primary); }
@@ -378,7 +371,7 @@
 .shop-cat-chip.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
 
 .shop-section { scroll-margin-top: 12px; margin-bottom: 20px; }
-.shop-section-title { font-size: 16px; font-weight: 800; margin: 0 0 10px; }
+.shop-section-title { font-size: 16px; font-weight: 700; margin: 0 0 10px; }
 
 .shop-popular-row { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 10px; -ms-overflow-style: none; scrollbar-width: none; }
 .shop-popular-row::-webkit-scrollbar { display: none; }
@@ -400,7 +393,7 @@
 .shop-prod-name { font-size: 13px; font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 2.5em; }
 .shop-prod-rating { font-size: 11.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; }
 .shop-prod-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
-.shop-prod-price { font-size: 14.5px; font-weight: 800; color: var(--color-primary); }
+.shop-prod-price { font-size: 14.5px; font-weight: 700; color: var(--color-primary); }
 .shop-prod-add {
   width: 28px; height: 28px; border-radius: 50%; border: none; background: var(--color-primary); color: #fff;
   display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
@@ -452,11 +445,15 @@
   display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;
   max-width: 480px; margin: 0 auto;
 }
-/* Only a logged-in customer ever sees a bottom nav (guests get none), so
-   only then does the cart bar need to stack above it instead of the
-   screen edge — see updateFixedBottomSpace() in app.js for the matching
-   reserved content padding. */
-body.has-bottomnav .floating-cart-btn { bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px) + 12px); }
+/* Stacks above the bottom nav instead of the screen edge whenever one is
+   present — see updateFixedBottomSpace() in app.js for the matching
+   reserved content padding. The +52px (not the nav's own height + a
+   plain 12px gap) is deliberate: the raised centre FAB (guest cart /
+   customer My Orientation, css/components.css .bottom-nav-fab) pokes
+   28px above the nav's own top edge, so a plain 12px clearance would
+   still let this pill's bottom edge visually collide with that circle
+   — this leaves a real ~12px gap above the FAB instead. */
+body.has-bottomnav .floating-cart-btn { bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px) + 52px); }
 @media (min-width: 761px) {
   .floating-cart-btn, body.has-bottomnav .floating-cart-btn { bottom: calc(env(safe-area-inset-bottom, 0px) + 24px); }
 }
@@ -486,7 +483,7 @@ body.has-bottomnav .floating-cart-btn { bottom: calc(var(--bottomnav-h) + env(sa
 .home-footer-grid {
   display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 28px; padding: 44px 20px 28px;
 }
-.home-footer-grid-single { grid-template-columns: 1fr; max-width: 420px; padding: 32px 20px; }
+.home-footer-grid-single { grid-template-columns: 1fr; max-width: 420px; padding: 20px 20px 14px; }
 .home-footer-links { display: flex; flex-direction: column; gap: 9px; }
 .home-footer-links a { color: #C9C7D1; text-decoration: none; font-size: 13.5px; cursor: pointer; }
 .home-footer-links a:hover { color: #fff; }
@@ -512,7 +509,346 @@ body.has-bottomnav .floating-cart-btn { bottom: calc(var(--bottomnav-h) + env(sa
   .home-header-actions { gap: 6px; }
   .home-header-actions .btn-icon { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; }
   .home-header-actions .btn-sm { padding: 7px 10px; font-size: 12px; min-height: 30px; }
-  .home-login-btn { display: none; }
   .home-footer-grid { grid-template-columns: 1fr; padding: 32px 16px 20px; }
   .home-footer-bottom { flex-direction: column; align-items: flex-start; }
+}
+
+/* ============================================================
+   PUBLIC MARKETING HOMEPAGE — hero, about, features, how-it-works,
+   between-lectures, discover shops, why-choose, final CTA.
+   Uses only existing design tokens (base.css :root) — no new colors.
+   No real food/campus photography exists in this project, so every
+   "media" panel below is a deliberate CSS-only graphic (gradient +
+   icon), never a fabricated stock photo.
+   ============================================================ */
+.mcenter { text-align: center; }
+.msection { padding: 30px 0; }
+/* Compact, app-native rows (categories/promotions/shops/popular food) —
+   tighter than a full editorial .msection, closer to how a real food-
+   delivery app stacks its home-screen carousels. */
+.msection-tight { padding: 16px 0; }
+.msection-title-sm { font-size: 17px; font-weight: 700; margin: 0 0 10px; color: var(--text-primary); }
+.msection-header-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.msection-header-row .msection-title-sm { margin-bottom: 0; }
+.msection-tint { background: var(--bg-surface-2); }
+.msection-title { font-size: 26px; font-weight: 700; line-height: 1.2; margin: 0 0 10px; color: var(--text-primary); }
+.msection-sub { font-size: 14.5px; line-height: 1.6; color: var(--text-secondary); margin: 0 0 8px; }
+.msection-sub-wide { max-width: 560px; margin-left: auto; margin-right: auto; }
+.mhero-eyebrow { margin: 0 0 8px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-primary); }
+.mhero-highlight { color: var(--color-primary); }
+
+/* ---------- Hero ---------- */
+.mhero { padding: 24px 0; background: var(--bg-body); }
+.mhero-inner { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 24px; align-items: center; }
+.mhero-title { font-size: 38px; font-weight: 700; line-height: 1.15; margin: 0 0 14px; color: var(--text-primary); letter-spacing: -0.01em; }
+.mhero-sub { font-size: 14.5px; line-height: 1.55; color: var(--text-secondary); max-width: 460px; margin: 0 0 16px; }
+.mhero-search { max-width: 460px; box-shadow: var(--shadow-sm); }
+.mhero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.mhero-actions .btn { gap: 8px; }
+.mhero-badges { display: flex; flex-wrap: wrap; gap: 12px 18px; }
+.mhero-badges-compact { gap: 8px 16px; }
+.mhero-badge { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.mhero-badge i, .mhero-badge svg { width: 16px; height: 16px; color: var(--color-primary); flex-shrink: 0; }
+.mhero-media {
+  position: relative; border-radius: var(--radius-lg); min-height: 260px;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+  display: flex; align-items: center; justify-content: center; overflow: hidden; box-shadow: var(--shadow-lg);
+}
+.mhero-media::before {
+  content: ''; position: absolute; inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.16) 2px, transparent 2px);
+  background-size: 30px 30px; opacity: 0.6;
+}
+.mhero-media.has-media::before { display: none; }
+.mhero-media-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+.mhero-media.has-media .mhero-media-accent {
+  z-index: 1; background: rgba(0,0,0,0.35); padding: 6px 10px; border-radius: 10px; backdrop-filter: blur(2px);
+}
+.mhero-media-accent {
+  position: absolute; top: 22px; left: 24px; color: #fff; font-family: cursive, 'Segoe Script', sans-serif;
+  font-size: 17px; font-weight: 600; line-height: 1.3; opacity: 0.92; transform: rotate(-4deg);
+}
+.mhero-media-badge {
+  width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.18);
+  border: 2px solid rgba(255,255,255,0.5); display: flex; align-items: center; justify-content: center;
+  color: #fff; box-shadow: var(--shadow-lg);
+}
+@media (max-width: 880px) {
+  .mhero-inner { grid-template-columns: 1fr; gap: 28px; }
+  .mhero-media { min-height: 220px; order: -1; }
+  .mhero-title { font-size: 32px; }
+}
+@media (max-width: 480px) {
+  .mhero { padding: 32px 0 40px; }
+  .mhero-title { font-size: 27px; }
+  .mhero-actions .btn { flex: 1 1 auto; }
+}
+
+/* ---------- Full-bleed hero (image + overlaid text) ---------- */
+.mhero-full {
+  position: relative; overflow: hidden; min-height: 460px;
+  display: flex; align-items: flex-end;
+  border-radius: 0 48px 48px 48px;
+  margin: 0 16px; box-shadow: var(--shadow-lg);
+  animation: mheroIn 0.8s cubic-bezier(0.16,1,0.3,1) both;
+}
+.mhero-full-media { position: absolute; inset: 0; z-index: 0; }
+.mhero-full-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+.mhero-full-fallback {
+  width: 100%; height: 100%;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+}
+.mhero-full-fallback::before {
+  content: ''; position: absolute; inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.16) 2px, transparent 2px);
+  background-size: 30px 30px; opacity: 0.6;
+}
+.mhero-full-scrim {
+  position: absolute; inset: 0;
+  background: linear-gradient(0deg, rgba(10,10,12,0.95) 0%, rgba(10,10,12,0.75) 30%, rgba(10,10,12,0.35) 60%, rgba(10,10,12,0.05) 100%);
+}
+@media (min-width: 761px) {
+  .mhero-full-scrim {
+    background: linear-gradient(90deg, rgba(10,10,12,0.95) 0%, rgba(10,10,12,0.80) 35%, rgba(10,10,12,0.25) 75%, rgba(10,10,12,0.05) 100%);
+  }
+}
+.mhero-full-content { position: relative; z-index: 1; padding: 32px 24px; width: 100%; }
+.mhero-pill {
+  display: inline-flex; align-items: center; gap: 7px; background: var(--color-primary); color: #fff;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+  padding: 8px 16px; border-radius: 999px; box-shadow: var(--shadow-md); margin-bottom: 16px;
+}
+.mhero-pill i, .mhero-pill svg { width: 13px; height: 13px; }
+.mhero-title-lg {
+  position: relative; margin: 0 0 16px; color: #fff;
+  font-size: clamp(34px, 8vw, 64px); font-weight: 900; line-height: 1.02; letter-spacing: -0.01em;
+}
+.mhero-underline { display: block; margin-top: 2px; width: 130px; height: 14px; }
+.mhero-sub-lg { max-width: 480px; color: rgba(255,255,255,0.88); font-size: 15.5px; line-height: 1.55; margin: 0; }
+@media (min-width: 761px) { .mhero-sub-lg { font-size: 18px; } }
+
+.mhero-below { position: relative; margin-top: -28px; z-index: 2; }
+.mhero-search-floating {
+  background: #fff; box-shadow: var(--shadow-lg); min-height: 56px; padding: 12px 18px; margin-bottom: 16px;
+}
+.mhero-search-floating input { font-size: 15px; }
+.mhero-search-floating:focus-within { box-shadow: 0 0 0 3px rgba(255,107,0,0.18), var(--shadow-lg); }
+.mhero-search-mic {
+  border: none; background: none; color: var(--color-primary); cursor: pointer; padding: 4px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.2s ease;
+}
+.mhero-search-mic:hover { background: var(--bg-surface-2); }
+.mhero-search-mic.listening { color: #fff; background: var(--color-primary); animation: mpulse 1.2s ease-out infinite; }
+
+.mbenefits-row {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 14px;
+  background: var(--bg-surface); border-radius: var(--radius-lg); padding: 14px 18px; box-shadow: var(--shadow-sm);
+}
+.mbenefit-item { display: flex; align-items: center; gap: 10px; }
+.mbenefit-icon {
+  width: 38px; height: 38px; border-radius: 50%; background: rgba(255,107,0,0.12); color: var(--color-primary);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.mbenefit-icon i, .mbenefit-icon svg { width: 18px; height: 18px; }
+.mbenefit-item div { display: flex; flex-direction: column; line-height: 1.25; }
+.mbenefit-item strong { font-size: 12.5px; color: var(--text-primary); }
+.mbenefit-item span { font-size: 11px; color: var(--text-secondary); }
+.mbenefit-divider { width: 1px; height: 30px; background: var(--border-color); }
+@media (max-width: 560px) {
+  .mbenefits-row { justify-content: space-between; gap: 8px; padding: 12px; }
+  .mbenefit-divider { display: none; }
+  .mbenefit-item strong { font-size: 11.5px; }
+  .mbenefit-item span { display: none; }
+}
+
+.btn-pill { border-radius: 999px; }
+
+/* ---------- About ---------- */
+.mabout { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 24px; align-items: center; }
+.mabout-media {
+  border-radius: var(--radius-lg); min-height: 160px; background: var(--color-charcoal); overflow: hidden;
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md);
+}
+.mabout-media-badge {
+  width: 96px; height: 96px; border-radius: 50%; background: rgba(255,107,0,0.18); color: var(--color-primary);
+  display: flex; align-items: center; justify-content: center;
+}
+.mabout-accent { font-family: cursive, 'Segoe Script', sans-serif; font-size: 18px; font-weight: 600; color: var(--color-primary); line-height: 1.35; margin-top: 14px; }
+@media (max-width: 780px) { .mabout { grid-template-columns: 1fr; gap: 24px; } .mabout-media { min-height: 160px; order: -1; } }
+
+/* ---------- Features ("More Than Just Food") ---------- */
+.mfeature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 8px; }
+.mfeature-card { padding: 16px 14px; }
+.mfeature-title { font-size: 15.5px; font-weight: 700; margin: 14px 0 6px; color: var(--text-primary); }
+.mfeature-desc { font-size: 13px; line-height: 1.55; color: var(--text-secondary); margin: 0; }
+
+/* ---------- How It Works (dark) ---------- */
+.mhow { background: var(--color-charcoal); color: #fff; }
+.mhow-title, .mhow-sub { color: #fff; }
+.mhow-sub { color: rgba(255,255,255,0.7); }
+.mhow-steps { display: flex; align-items: flex-start; justify-content: center; gap: 14px; margin-top: 20px; flex-wrap: wrap; }
+.mhow-step { display: flex; flex-direction: column; align-items: center; text-align: center; max-width: 220px; }
+.mhow-step h4 { font-size: 14.5px; font-weight: 700; margin: 16px 0 6px; color: #fff; }
+.mhow-step p { font-size: 12.5px; line-height: 1.55; color: rgba(255,255,255,0.65); margin: 0; }
+.mhow-step-badge-wrap { position: relative; }
+.mhow-step-badge {
+  display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 50%;
+  background: var(--color-primary); color: #fff; font-weight: 700; font-size: 16px;
+}
+.mhow-step-icon {
+  position: absolute; bottom: -8px; right: -8px; width: 30px; height: 30px; border-radius: 50%;
+  background: #fff; color: var(--color-charcoal); display: flex; align-items: center; justify-content: center;
+  border: 3px solid var(--color-charcoal);
+}
+.mhow-step-icon i, .mhow-step-icon svg { width: 14px; height: 14px; }
+.mhow-arrow { color: var(--color-primary); align-self: center; margin-top: 20px; }
+@media (max-width: 700px) { .mhow-arrow { display: none; } }
+
+/* ---------- Hungry Between Lectures ---------- */
+.mlectures { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 24px; align-items: center; }
+.mlectures-checklist { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; }
+.mlectures-checklist li { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.mlectures-checklist i, .mlectures-checklist svg { width: 16px; height: 16px; color: var(--color-success); flex-shrink: 0; }
+.mlectures-media {
+  border-radius: var(--radius-lg); min-height: 160px; background: linear-gradient(135deg, var(--color-primary-light), var(--color-primary)); overflow: hidden;
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md);
+}
+.mlectures-media-badge {
+  width: 96px; height: 96px; border-radius: 50%; background: rgba(255,255,255,0.25); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+@media (max-width: 780px) {
+  .mlectures { grid-template-columns: 1fr; gap: 24px; }
+  .mlectures-media { min-height: 160px; order: -1; }
+  .mlectures-checklist { grid-template-columns: 1fr; }
+}
+
+/* ---------- Discover Food Shops (real store data) ---------- */
+.mshop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 14px; }
+.mshop-card { background: var(--bg-surface); border-radius: var(--radius-md); overflow: hidden; cursor: pointer; box-shadow: var(--shadow-sm); transition: transform var(--transition-fast); }
+.mshop-card:hover { transform: translateY(-2px); }
+.mshop-card-img { position: relative; aspect-ratio: 4/3; background: var(--bg-surface-2); }
+.mshop-card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mshop-card-img-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+.mshop-card-status { position: absolute; top: 8px; left: 8px; font-size: 9.5px; }
+.mshop-card-body { padding: 10px 12px 12px; }
+.mshop-card-name { font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mshop-card-fulfil { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+
+/* ---------- Why Choose clickFud ---------- */
+.mwhy-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; }
+/* Compact single-row trust strip — replaces the old big "Why Choose"
+   section with icon+description cards; just small icon+label pairs. */
+.mwhy-item { display: flex; align-items: flex-start; gap: 12px; }
+.mwhy-icon {
+  width: 44px; height: 44px; border-radius: 50%; background: rgba(255,107,0,0.14); color: var(--color-primary);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.mwhy-item strong { font-size: 13.5px; color: var(--text-primary); }
+.mwhy-item p { font-size: 12.5px; color: var(--text-secondary); margin: 3px 0 0; line-height: 1.5; }
+
+/* ---------- Final CTA (dark) ---------- */
+.mcta { background: var(--color-charcoal); color: #fff; }
+.mcta-compact { padding: 22px 0; }
+.mcta-compact .mcta-accent { font-size: 19px; }
+.mcta-inner { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.mcta-accent { font-family: cursive, 'Segoe Script', sans-serif; font-size: 24px; font-weight: 600; color: #fff; line-height: 1.3; margin: 0; }
+.mcta-right { text-align: right; }
+.mcta-sub { font-size: 14px; color: rgba(255,255,255,0.75); margin: 0 0 14px; }
+.mcta-right .mhero-actions { justify-content: flex-end; margin-bottom: 0; }
+@media (max-width: 700px) {
+  .mcta-inner { flex-direction: column; text-align: center; }
+  .mcta-right { text-align: center; }
+  .mcta-right .mhero-actions { justify-content: center; }
+}
+
+/* ============================================================
+   "Modern and live" pass — scroll-reveal motion, a real live-data
+   stats strip, ambient background motion, and stronger hover/press
+   feedback. No new colors, no fabricated numbers (mstats' values come
+   from real store/menu data — see liveStats() in home.js).
+   ============================================================ */
+
+/* ---------- Scroll reveal (initMarketingReveal() in home.js) ---------- */
+.mreveal { opacity: 0; transform: translateY(28px); transition: opacity 0.7s cubic-bezier(0.16,1,0.3,1), transform 0.7s cubic-bezier(0.16,1,0.3,1); }
+.mreveal-in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .mreveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* ---------- Hero: plays once on load, ambient floating glow behind it ---------- */
+.mhero { position: relative; overflow: hidden; animation: mheroIn 0.8s cubic-bezier(0.16,1,0.3,1) both; }
+@keyframes mheroIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.mhero::before {
+  content: ''; position: absolute; top: -120px; right: -120px; width: 360px; height: 360px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,107,0,0.16), transparent 70%);
+  animation: mfloat 9s ease-in-out infinite; pointer-events: none; z-index: 0;
+}
+.mhero-inner { position: relative; z-index: 1; }
+@keyframes mfloat { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-18px, 22px); } }
+.mhero-media { animation: mfloat 7s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .mhero, .mhero::before, .mhero-media { animation: none; }
+}
+
+/* ---------- Live stats strip ---------- */
+.mstats {
+  position: relative; overflow: hidden; background: var(--color-charcoal); padding: 20px 0;
+  margin: 8px 16px; border-radius: 24px; box-shadow: var(--shadow-md);
+}
+.mstats::before, .mstats::after {
+  content: ''; position: absolute; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, rgba(255,107,0,0.22), transparent 70%);
+}
+.mstats::before { width: 220px; height: 220px; top: -110px; left: -60px; }
+.mstats::after { width: 180px; height: 180px; bottom: -100px; right: -40px; }
+.mstats-row { position: relative; z-index: 1; }
+.mstats-row { display: flex; justify-content: center; gap: 48px; flex-wrap: wrap; text-align: center; }
+.mstat { display: flex; flex-direction: column; gap: 4px; }
+.mstat-value { font-size: 30px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+.mstat-label { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.65); text-transform: uppercase; letter-spacing: 0.04em; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 0 rgba(34,197,94,0.6); animation: mpulse 1.8s ease-out infinite; flex-shrink: 0; }
+@keyframes mpulse {
+  0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }
+  70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); }
+  100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+}
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+@media (max-width: 480px) { .mstats-row { gap: 28px; } .mstat-value { font-size: 24px; } }
+
+/* ---------- Stronger hover/press feedback (modern micro-interactions) ---------- */
+.mfeature-card, .mshop-card, .mwhy-item { transition: transform 0.25s ease, box-shadow 0.25s ease; }
+.mfeature-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
+.mwhy-item:hover .mwhy-icon { transform: scale(1.08); }
+.mwhy-icon { transition: transform 0.25s ease; }
+.mshop-card:hover { box-shadow: var(--shadow-md); }
+.mshop-card-img img { transition: transform 0.4s ease; }
+.mshop-card:hover .mshop-card-img img { transform: scale(1.06); }
+.mnav-links a { position: relative; transition: color 0.2s ease; }
+.mnav-links a::after {
+  content: ''; position: absolute; left: 0; right: 100%; bottom: -3px; height: 2px; background: var(--color-primary);
+  transition: right 0.25s ease;
+}
+.mnav-links a:hover::after { right: 0; }
+.mhero-actions .btn, .mcta .btn { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.mhero-actions .btn:hover, .mcta .btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.mhow-step-badge { transition: transform 0.25s ease; }
+.mhow-step:hover .mhow-step-badge { transform: scale(1.08); }
+
+/* ---------- "Start Order" guided flow (guest, home page only) ---------- */
+.guest-order-option {
+  width: 100%; text-align: left; padding: 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px;
+  border: 1.5px solid var(--border-color); background: var(--bg-surface); cursor: pointer; transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.guest-order-option:last-child { margin-bottom: 0; }
+.guest-order-option:hover { border-color: var(--color-primary); transform: translateY(-1px); }
+.guest-order-banner {
+  display: inline-flex; align-items: center; gap: 8px; background: var(--bg-surface); border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill); padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--text-primary);
+  margin-left: auto; margin-right: auto;
+}
+.guest-order-banner i, .guest-order-banner svg { width: 15px; height: 15px; color: var(--color-primary); }
+.guest-order-banner button {
+  border: none; background: none; color: var(--color-primary); font-weight: 700; font-size: 12.5px; cursor: pointer;
+  padding: 0; margin-left: 4px; text-decoration: underline;
 }

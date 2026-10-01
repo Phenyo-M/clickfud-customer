@@ -125,6 +125,7 @@ Deno.serve(async (req) => {
       accountNumberLast4: last4,
     });
   } catch (e) {
+    console.error(e);
     return json({ error: "Something went wrong setting up your payout account." }, 500);
   }
 });

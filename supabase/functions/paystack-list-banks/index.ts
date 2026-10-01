@@ -60,6 +60,7 @@ Deno.serve(async (req) => {
     const banks = (data.data || []).map((b: any) => ({ name: b.name, code: b.code }));
     return json({ banks });
   } catch (e) {
+    console.error(e);
     return json({ error: "Something went wrong." }, 500);
   }
 });

@@ -15,11 +15,13 @@ App.Store = (function () {
     dataLoadError: false,  // set if stores/menu failed to load, cleared on retry
     stores: [],
     storePromotions: [],
-    topAdvert: null,
+    homePageMedia: {},    // { hero: url|null, about: url|null, lectures: url|null } — developer-uploaded, see js/home-page-media.js
+    homePageMediaText: {}, // { about: {title,subtitle}, lectures: {...} } — same file, section 41
     menu: [],
     menuItemExtras: [],
     addons: [],
     orders: [],
+    timetable: [],
     notifications: [],
     reviews: [],
     promotions: [],
@@ -44,6 +46,12 @@ App.Store = (function () {
     // email link — set once at boot from the URL, never authoritative.
     authCallbackHint: null,
     authCallbackError: null,
+    // Offline browsing (js/connectivity.js, js/offline-cache.js) —
+    // `online` is real Supabase reachability, not just navigator.onLine.
+    connection: { online: navigator.onLine, usingCachedData: false, lastSyncedAt: null },
+    // User id whose orders + reviews have BOTH finished loading (js/app.js
+    // loadPrivateData). The rating prompt waits for this.
+    privateDataFor: null,
   };
 
   const listeners = [];
@@ -229,50 +237,137 @@ App.Store = (function () {
   // notifications, reviews) are only subscribed after login.
   let publicChannels = [];
   let channels = [];
+  let chStoresRef = null;
+  // undefined = not yet decided; null = deliberately unfiltered (guest, or
+  // a customer whose university isn't known yet); a string once scoped.
+  let storesFilterUniversity;
 
-  function initPublicRealtime() {
-    if (publicChannels.length) return;
-    const chMenu = App.sb.channel('menu-changes')
+  // menu_items and store_promotions do NOT have a university column of
+  // their own (only stores does) — Supabase Realtime's Postgres Changes
+  // filter only supports a plain column check on the table you're
+  // subscribed to, not a join through store_id to look one up. So unlike
+  // the stores channel below, these two genuinely can't be scoped to
+  // "only this customer's university" without denormalizing a university
+  // column onto them first (a real schema change, not done here) — every
+  // connected client still gets every menu/promo change platform-wide.
+  // supabase-js hands back the EXISTING channel object when asked for a
+  // topic it still holds — and a channel that was just removed is held
+  // until its unsubscribe completes. Adding .on() to that already-
+  // subscribed channel throws, which broke sign-in setup (and with it the
+  // Paystack confirmation) whenever a channel was re-created quickly: on
+  // login restore, sign-out/sign-in, or a university change. A unique
+  // topic per creation means a fresh channel every time. (Topic names are
+  // client-side labels only; postgres_changes filtering is unaffected.)
+  let channelSeq = 0;
+  function uniqueTopic(name) { return `${name}-${++channelSeq}`; }
+
+  function subscribeMenuChannel() {
+    return App.sb.channel('menu-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, (payload) => {
         if (payload.eventType === 'DELETE') removeFrom('menu', payload.old.id);
         else upsertIn('menu', payload.new);
+        catalogChanged();
       }).subscribe();
-
-    const chStores = App.sb.channel('stores-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, (payload) => {
-        if (payload.eventType === 'DELETE') removeFrom('stores', payload.old.id);
-        else upsertIn('stores', payload.new);
-      }).subscribe();
-
-    const chStorePromos = App.sb.channel('store-promotions-changes')
+  }
+  function subscribeStorePromosChannel() {
+    return App.sb.channel('store-promotions-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'store_promotions' }, (payload) => {
         if (payload.eventType === 'DELETE') removeFrom('storePromotions', payload.old.id);
         else upsertIn('storePromotions', payload.new);
+        catalogChanged();
       }).subscribe();
+  }
+  // stores.university IS a real column, so this one genuinely can be (and
+  // is) scoped — a guest or a customer whose university isn't known yet
+  // gets the unfiltered platform-wide feed (never wrong, just broader);
+  // rescopeStoresRealtime() below narrows it the moment a real university
+  // is known, cutting what every logged-in customer's browser receives
+  // down to just their own campus's store changes.
+  function subscribeStoresChannel(university) {
+    const filterConfig = { event: '*', schema: 'public', table: 'stores' };
+    if (university) filterConfig.filter = `university=eq.${university}`;
+    return App.sb.channel(uniqueTopic(university ? `stores-changes-${university}` : 'stores-changes'))
+      .on('postgres_changes', filterConfig, (payload) => {
+        if (payload.eventType === 'DELETE') removeFrom('stores', payload.old.id);
+        else upsertIn('stores', payload.new);
+        catalogChanged();
+      }).subscribe();
+  }
 
-    publicChannels = [chMenu, chStores, chStorePromos];
+  // A live shop/menu/promo change should also land in the offline
+  // snapshot (js/offline-cache.js) — debounced, since a burst of realtime
+  // events (e.g. a stock countdown) shouldn't mean a burst of writes.
+  let catalogSaveTimer = null;
+  function catalogChanged() {
+    if (!state.connection.online || state.connection.usingCachedData) return;
+    clearTimeout(catalogSaveTimer);
+    catalogSaveTimer = setTimeout(() => App.OfflineCache.saveCatalog(state), 3000);
+  }
+
+  function initPublicRealtime() {
+    if (publicChannels.length) return;
+    const chMenu = subscribeMenuChannel();
+    // A saved login can finish restoring BEFORE the public data loads, so
+    // rescopeStoresRealtime(university) may already have created the
+    // scoped stores channel. Keep it — resetting to the unfiltered feed
+    // here made the next rescope try to re-create that same channel,
+    // which throws once it's already subscribed.
+    if (!chStoresRef) {
+      storesFilterUniversity = null;
+      chStoresRef = subscribeStoresChannel(null);
+    }
+    const chStorePromos = subscribeStorePromosChannel();
+    publicChannels = [chMenu, chStoresRef, chStorePromos];
+  }
+
+  // Called right after a real profile (with a real university) becomes
+  // known — see js/auth.js applySignedInSession() — and on logout, which
+  // reverts to the unfiltered feed since a guest hasn't chosen one yet.
+  function rescopeStoresRealtime(university) {
+    const next = university || null;
+    if (storesFilterUniversity === next) return; // already correct, nothing to do
+    const old = chStoresRef;
+    storesFilterUniversity = next;
+    chStoresRef = subscribeStoresChannel(next);
+    publicChannels = publicChannels.map((ch) => (ch === old ? chStoresRef : ch));
+    if (old) App.sb.removeChannel(old);
   }
 
   function teardownRealtime() {
     channels.forEach(ch => App.sb.removeChannel(ch));
     channels = [];
   }
+  // Scoped to the signed-in customer's OWN rows. Unfiltered, Supabase
+  // Realtime has to run an RLS check for every connected customer on every
+  // single order/notification/review change platform-wide (1 new order x
+  // 1,000 students online = ~1,000 permission checks) just to discard it
+  // for all but one of them. With a filter, a change is only evaluated for
+  // the subscriber it actually belongs to. RLS still applies on top —
+  // this only cuts wasted work, it grants nothing. (This app only ever
+  // signs in customers — js/auth.js rejects every other role.)
   function initRealtime() {
     teardownRealtime();
-    const chOrders = App.sb.channel('orders-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+    const uid = state.profile && state.profile.id;
+    if (!uid) return;
+    const chOrders = App.sb.channel(uniqueTopic('orders-changes-' + uid))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `customer_id=eq.${uid}` }, (payload) => {
         if (payload.eventType === 'DELETE') removeFrom('orders', payload.old.id);
-        else upsertIn('orders', payload.new);
+        else {
+          upsertIn('orders', payload.new);
+          // A Paystack payment we're waiting on just became a real order
+          // (created by paystack-webhook) — js/app.js confirms it now.
+          if (App.onOwnOrderChange) App.onOwnOrderChange(payload.new);
+        }
       }).subscribe();
 
-    const chNotif = App.sb.channel('notifications-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, (payload) => {
+    const chNotif = App.sb.channel(uniqueTopic('notifications-changes-' + uid))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, (payload) => {
         if (payload.eventType === 'DELETE') removeFrom('notifications', payload.old.id);
         else upsertIn('notifications', payload.new);
       }).subscribe();
 
-    const chReviews = App.sb.channel('reviews-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, (payload) => {
+    const chReviews = App.sb.channel(uniqueTopic('reviews-changes-' + uid))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews', filter: `customer_id=eq.${uid}` }, (payload) => {
         if (payload.eventType !== 'DELETE') upsertIn('reviews', payload.new);
       }).subscribe();
 
@@ -287,6 +382,6 @@ App.Store = (function () {
     updateCartQty, removeCartItem, clearCart,
     loadFavorites, saveFavorites, toggleFavorite,
     loadFavoriteStores, saveFavoriteStores, toggleFavoriteStore,
-    initRealtime, teardownRealtime, initPublicRealtime,
+    initRealtime, teardownRealtime, initPublicRealtime, rescopeStoresRealtime,
   };
 })();

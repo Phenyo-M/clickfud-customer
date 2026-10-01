@@ -1,0 +1,6 @@
+# Not part of the website — keep out of Vercel uploads
+supabase
+backend
+.vscode
+.claude
+.netlify

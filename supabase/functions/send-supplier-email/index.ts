@@ -135,6 +135,7 @@ Deno.serve(async (req) => {
     if (sendError) return json({ error: "Could not send the email. Please try again." });
     return json({ data: { sent: true, to: supplier.email } });
   } catch (e) {
+    console.error(e);
     return json({ error: "Something went wrong sending this email." }, 500);
   }
 });

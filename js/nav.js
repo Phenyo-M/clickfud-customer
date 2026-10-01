@@ -1,13 +1,19 @@
 /* ============================================================
-   CLICKFUD — back-button navigation (History API) + logout guard
+   CLICKFUD — back-button navigation (History API)
 
    Every screen change (route.view/params, or entering/leaving the
    login/signup form) is pushed as a history entry so the phone's back
    button steps back through the app's own screens instead of leaving
-   the page. The entry created the moment a user logs in is treated as
-   "idx 0" — pressing back from there asks to log out instead of
-   exiting, and only while logged in; logged-out browsing falls through
-   to normal browser back-button behavior once our stack is exhausted.
+   the page. The entry created the moment a user logs in is "idx 0" —
+   pressing back once the stack is exhausted from there sends a logged-
+   in student to Home (never a logout prompt: logging out only ever
+   happens from the explicit Logout button in More, see js/app.js
+   confirmLogout() — an earlier version of this file also asked to log
+   out here, which is exactly the "pressing back logs me out" behaviour
+   this was changed to stop). Already on Home, or logged out: nothing
+   useful left in our own stack, so real browser back-button behavior
+   (e.g. exiting the app) takes over, same as any normal app's root
+   screen.
    ============================================================ */
 window.App = window.App || {};
 
@@ -62,37 +68,20 @@ App.Nav = (function () {
     lastSig = sig;
   }
 
-  function showLogoutConfirm() {
-    App.Modal.confirm({
-      title: 'Log out?',
-      message: 'Are you sure you want to log out?',
-      confirmLabel: 'Yes',
-      cancelLabel: 'No',
-      onConfirm: async () => {
-        await App.doLogout();
-        idx = 0;
-        lastSig = currentSignature();
-        history.replaceState({ idx, sig: lastSig }, '', location.href);
-      },
-      // Cancel (or dismiss via overlay/Escape): nothing changes — the guard
-      // entry below has already been re-pushed, so the screen stays put.
-    });
-  }
-
   window.addEventListener('popstate', (e) => {
     const state = e.state;
     const loggedIn = !!(S.state.session && S.state.profile);
 
     if (!state || state.idx <= 0) {
-      if (loggedIn) {
-        // Swallow this back-press: re-plant the guard entry so cancelling
-        // leaves the user exactly where they were, then ask to log out.
+      if (loggedIn && S.state.route.view !== 'home') {
+        // Nothing left in this app's own back-stack, but we're deep in
+        // some other screen (e.g. Track Order) — go Home instead of
+        // prompting to log out. sync() (called automatically after this
+        // render, via onStateChange) pushes a fresh "idx 0 = Home" guard
+        // entry on its own — nothing else to do here.
         idx = 0;
-        history.pushState({ idx, sig: lastSig }, '', location.href);
-        showLogoutConfirm();
+        S.setRoute({ view: 'home', params: {} });
       }
-      // Logged out: nothing left in our stack — let the browser's own
-      // back behavior take over (it has already navigated by this point).
       return;
     }
 

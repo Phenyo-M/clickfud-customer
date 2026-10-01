@@ -1,0 +1,76 @@
+<!--
+  CLICKFUD — "Confirm signup" email template
+  Paste this into: Supabase Dashboard → Authentication → Emails → Templates → "Confirm signup"
+  Also set the template's Subject to: Verify your clickFud email
+
+  Uses Supabase's own template variables — {{ .ConfirmationURL }} is the
+  real, secure, Supabase-generated verification link. Nothing here
+  invents its own token/link logic.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Verify your clickFud email</title>
+</head>
+<body style="margin:0; padding:0; background-color:#FAF9F6; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAF9F6; padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px; width:100%; background-color:#FFFFFF; border-radius:20px; overflow:hidden; border:1px solid #E7E5E1;">
+          <tr>
+            <td style="background-color:#000000; padding:28px 32px; text-align:center;">
+              <img src="https://clickfud-customer.vercel.app/icons/clickfud-logo-full-512.png" alt="clickFud" width="120" style="display:block; margin:0 auto;" />
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:36px 32px 8px;">
+              <h1 style="margin:0 0 4px; font-size:22px; font-weight:800; color:#1E1E24;">Verify your email address</h1>
+              <p style="margin:0; font-size:14px; color:#6B7280; line-height:1.6;">
+                Thanks for signing up for clickFud. You received this email because this address was used to create a clickFud account. Confirm it's really you to activate your account.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block; background-color:#FF6B00; color:#FFFFFF; text-decoration:none; font-weight:700; font-size:15px; padding:14px 32px; border-radius:999px;">
+                      Verify My Email
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 8px;">
+              <p style="margin:0; font-size:13px; color:#6B7280; line-height:1.6;">
+                Or paste this link into your browser:<br />
+                <a href="{{ .ConfirmationURL }}" style="color:#FF6B00; word-break:break-all;">{{ .ConfirmationURL }}</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px 32px;">
+              <p style="margin:0; font-size:12.5px; color:#6B7280; line-height:1.6;">
+                If you didn't create a clickFud account, you can safely ignore this email — no account will be activated without confirming this link.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#F4F3F0; padding:20px 32px; border-top:1px solid #E7E5E1;">
+              <p style="margin:0; font-size:12px; color:#6B7280; text-align:center;">
+                clickFud — Order Faster. Learn Better.<br />
+                This is an automated message, please don't reply directly to this email.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

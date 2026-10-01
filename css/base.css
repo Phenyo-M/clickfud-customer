@@ -98,6 +98,8 @@ body {
   background: var(--bg-body);
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   transition: background var(--transition-med), color var(--transition-med);
   padding-top: var(--nav-h);
@@ -147,14 +149,45 @@ ul { margin: 0; padding: 0; list-style: none; }
    handles mobile browser chrome (address bar show/hide) correctly,
    falling back to 100vh where dvh isn't supported. Shown only while
    !authReady (js/app.js) — once that flips true, this element is simply
-   never rendered again, and the fade-in below plays once per app launch. */
+   never rendered again.
+
+   No entrance animation (there used to be one, splashFadeIn) —
+   js/app.js fully replaces #app's innerHTML on every single state
+   change (theme, an auth callback hint being set, session/profile
+   resolving, etc.), and this splash can legitimately re-render several
+   times before S.state.authReady actually flips true. An animation
+   restarts from scratch every time its element is torn down and
+   recreated, which is exactly what a full innerHTML replace does — so
+   the one splash screen appeared to "pop up again" a few seconds later,
+   even though it was never a second/different screen. Rendering it
+   statically makes any number of re-renders during that window
+   completely invisible.
+
+   Background is always --color-offwhite (#FAF9F6), NEVER --bg-body —
+   deliberately not theme-aware, even in dark mode. Installing this app
+   to a home screen makes the OS itself show its own splash screen first
+   (generated from manifest.json's background_color, #FAF9F6 — the
+   browser/OS renders this before any of our JS/CSS runs, so it can
+   never follow the in-app dark-mode setting). If this element then
+   painted --bg-body's DARK value on top of that, the two would visibly
+   clash — the exact "two different pages, and dark mode shows a white
+   one" the app owner reported. Matching that same fixed light colour
+   here keeps the OS splash and this one visually indistinguishable, so
+   the only real transition is this splash to the real (correctly
+   themed) app underneath it. */
 .splash-screen {
   position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; z-index: 5000;
-  background: var(--bg-body); display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 40px 20px; animation: splashFadeIn 220ms ease;
+  background: var(--color-offwhite); display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 40px 20px;
 }
-@keyframes splashFadeIn { from { opacity: 0; } to { opacity: 1; } }
-.ce-logo-badge svg { display: block; }
+/* The background above is deliberately fixed/light regardless of theme
+   (see the comment on .splash-screen) — any text on it (the rare auth-
+   callback hint, e.g. "Verifying your email…") must stay fixed too,
+   rather than using .text-muted's normal var(--text-secondary), which
+   in dark mode is a light colour meant for a dark background and would
+   be hard to read here. */
+.splash-screen .text-muted { color: #6B7280; }
+.cf-logo-badge svg { display: block; }
 .text-success { color: var(--color-success); }
 .text-error { color: var(--color-error); }
 .font-bold { font-weight: 700; } .font-semibold { font-weight: 600; }
@@ -164,7 +197,7 @@ ul { margin: 0; padding: 0; list-style: none; }
 .divider { height: 1px; background: var(--border-color); border: none; margin: 16px 0; }
 
 /* ---------- Typography scale ---------- */
-.page-title { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+.page-title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
 
 /* ---------- Buttons ---------- */
 .btn {
@@ -194,7 +227,7 @@ ul { margin: 0; padding: 0; list-style: none; }
   content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%;
   border: 2px solid rgba(255,255,255,0.5); border-top-color: #fff; animation: spin 0.7s linear infinite;
 }
-.btn-secondary.btn-loading::after, .btn-ghost.btn-loading::after { border-color: rgba(30,30,36,0.25); border-top-color: var(--text-primary); }
+.btn-secondary.btn-loading::after, .btn-ghost.btn-loading::after, .btn-google.btn-loading::after { border-color: rgba(30,30,36,0.25); border-top-color: #1f1f1f; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- Forms ---------- */
@@ -253,9 +286,22 @@ ul { margin: 0; padding: 0; list-style: none; }
 .empty-state .icon-wrap { width: 64px; height: 64px; border-radius: 50%; background: var(--bg-surface-2); display: flex; align-items: center; justify-content: center; color: var(--color-primary); margin-bottom: 6px; }
 .empty-state h3 { color: var(--text-primary); font-size: 16px; }
 
-/* ---------- Scrollbars (light touch) ---------- */
+/* ---------- Scrollbars (light touch on desktop; fully hidden on touch/mobile) ----------
+   This app is mobile-first (see css/components.css .bottom-nav etc.), and
+   a visible scrollbar thumb reads as a desktop-web artifact there, not
+   part of the native app feel — hidden wherever the primary input is
+   touch (hover:none/pointer:coarse covers real phones/tablets, unlike a
+   width media query, which a touch-enabled 2-in-1 laptop would still
+   fail). Scrolling itself is completely unaffected either way — these
+   properties only ever hide the browser's own scrollbar chrome, never
+   the ability to scroll. The light desktop scrollbar below is left
+   exactly as it was for mouse/trackpad users. */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+@media (hover: none), (pointer: coarse) {
+  * { scrollbar-width: none; -ms-overflow-style: none; }
+  ::-webkit-scrollbar { display: none; width: 0; height: 0; }
+}
 
 /* Utility for icon sizing via lucide */
 [data-lucide] { width: 1em; height: 1em; }

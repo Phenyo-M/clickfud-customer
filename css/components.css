@@ -17,7 +17,7 @@
   transition: top var(--transition-med);
 }
 .app-nav .container { display:flex; align-items:center; justify-content: space-between; width:100%; padding:0; }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 18px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; }
 .brand-name { color: var(--color-primary); }
 .brand-icon { width: 34px; height: 34px; border-radius: 10px; background: var(--color-primary); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .nav-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
@@ -61,6 +61,7 @@
   padding: 4px 10px 4px 4px; border-radius: var(--radius-pill); color: var(--text-primary); flex-shrink: 0;
 }
 .profile-trigger:hover, .profile-trigger.open { background: var(--bg-surface-2); }
+.nav-menu-btn.open { background: var(--border-color); }
 .profile-trigger-name { font-size: 14px; font-weight: 700; white-space: nowrap; }
 .profile-menu-panel {
   position: fixed; min-width: 180px; background: var(--bg-elevated); border: 1px solid var(--border-color);
@@ -132,6 +133,11 @@
   background: transparent;
   border-top: none;
   box-shadow: none;
+  /* Floats a short distance off the screen edges (home page only —
+     the logged-in customer bottom nav is untouched) rather than
+     sitting flush edge-to-edge. */
+  left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  padding-bottom: 0;
 }
 /* The scalloped notch is masked onto this ::before background layer
    ONLY, not the <nav> element itself — mask-image composites an
@@ -143,9 +149,10 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  box-shadow: var(--shadow-lg);
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border-radius: 24px;
+  box-shadow: 0 10px 40px rgba(20,20,24,0.18);
   -webkit-mask-image: radial-gradient(circle 34px at 50% 0px, transparent 32px, black 33px);
   mask-image: radial-gradient(circle 34px at 50% 0px, transparent 32px, black 33px);
 }
@@ -167,6 +174,17 @@
 .bottom-nav-fab svg { width: 24px; height: 24px; }
 .bottom-nav-fab:active { transform: translate(-50%, -50%) scale(0.94); }
 .bottom-nav-fab .cart-count { top: -2px; right: -2px; }
+
+/* My Orientation now owns this centre spot for a logged-in customer —
+   the cart moved to its own separate .floating-cart-btn pill above (see
+   js/shared-ui.js renderBottomNav()) so it never displaces this button. */
+.bottom-nav-fab-orientation { background: var(--color-primary); }
+.bottom-nav-fab-orientation .bottom-nav-fab-logo {
+  width: 36px; height: 36px; border-radius: 50%; background: #fff;
+  display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;
+}
+.bottom-nav-fab-orientation .bottom-nav-fab-logo img { width: 100%; height: 100%; object-fit: contain; padding: 6px; box-sizing: border-box; display: block; }
+.bottom-nav-fab-orientation.active { box-shadow: var(--shadow-lg), 0 0 0 3px rgba(255,107,0,0.32); }
 
 /* ---------- Full-screen image viewer (pinch-zoom/drag) ---------- */
 .image-viewer-overlay {
@@ -196,7 +214,7 @@
 .modal.modal-lg { max-width: 760px; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px 0; }
-.modal-title { font-size: 19px; font-weight: 800; }
+.modal-title { font-size: 18px; font-weight: 700; }
 .modal-close { background: var(--bg-surface-2); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-primary); }
 .modal-close:hover { background: var(--border-color); }
 .modal-body { padding: 18px 22px; }
@@ -246,7 +264,7 @@
 .qty-btn { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border-color); background: var(--bg-surface-2); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .qty-btn:hover { background: var(--border-color); }
 .cart-summary-row { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; color: var(--text-secondary); }
-.cart-summary-row.total { font-size: 17px; font-weight: 800; color: var(--text-primary); padding-top: 10px; border-top: 1px dashed var(--border-color); margin-top: 6px; }
+.cart-summary-row.total { font-size: 17px; font-weight: 700; color: var(--text-primary); padding-top: 10px; border-top: 1px dashed var(--border-color); margin-top: 6px; }
 
 /* ---------- Menu cards ---------- */
 .menu-card { display: flex; flex-direction: column; overflow: hidden; cursor: pointer; }
@@ -264,9 +282,13 @@
 .menu-card-body { padding: 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .menu-card-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .menu-card-desc { font-size: 12.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* Discovery card copy, deliberately just name + shop (no description) —
+   a food photo, its name and price are enough to decide "tap this to
+   look further"; anything more reads as clutter on a browse screen. */
+.menu-card-name { font-weight: 600; font-size: 14px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-card-store { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 8px; }
-.price-tag { font-size: 17px; font-weight: 800; color: var(--color-primary); }
-.rating-inline { display: flex; align-items: center; gap: 3px; font-size: 12.5px; font-weight: 700; color: #b8860b; }
+.price-tag { font-size: 17px; font-weight: 700; color: var(--color-primary); }
 
 /* ---------- Category chips ---------- */
 .chip-row { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; -ms-overflow-style: none; scrollbar-width: none; }
@@ -290,6 +312,25 @@
   display:flex; align-items:center; gap:6px;
 }
 .chip.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
+/* ---------- My Timetable: Day/Week toggle + day tabs ---------- */
+.tt-view-toggle { display: flex; gap: 2px; background: var(--bg-surface-2); border-radius: var(--radius-pill); padding: 3px; }
+.tt-view-toggle-btn {
+  border: none; background: none; padding: 7px 14px; border-radius: var(--radius-pill); font-size: 12.5px; font-weight: 700;
+  color: var(--text-secondary); cursor: pointer;
+}
+.tt-view-toggle-btn.active { background: var(--color-primary); color: #fff; }
+.tt-day-tabs {
+  display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 12px; -ms-overflow-style: none; scrollbar-width: none;
+}
+.tt-day-tabs::-webkit-scrollbar { display: none; }
+.tt-day-tab {
+  flex-shrink: 0; min-width: 52px; padding: 9px 6px; border-radius: var(--radius-md); background: var(--bg-surface-2); border: 1px solid var(--border-color);
+  font-size: 12.5px; font-weight: 700; color: var(--text-secondary); cursor: pointer; position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.tt-day-tab.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+.tt-day-tab-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.85; }
 
 /* Checkout collection-time picker: a compact two-column grid instead of
    the horizontally-scrolling .chip-row, since there are only ever a
@@ -345,7 +386,7 @@ table.data-table tbody tr:hover { background: var(--bg-surface-2); }
 .kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 900px) { .kanban { grid-template-columns: 1fr; } }
 .kanban-col { background: var(--bg-surface-2); border-radius: var(--radius-lg); padding: 12px; min-height: 200px; }
-.kanban-col-title { font-weight: 800; font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.02em; padding: 6px 8px 12px; display: flex; align-items: center; justify-content: space-between; color: var(--text-secondary); }
+.kanban-col-title { font-weight: 600; font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.02em; padding: 6px 8px 12px; display: flex; align-items: center; justify-content: space-between; color: var(--text-secondary); }
 .ticket { background: var(--bg-surface); border-radius: var(--radius-md); padding: 14px; margin-bottom: 12px; box-shadow: var(--shadow-sm); border-left: 4px solid var(--border-strong); }
 .ticket.priority-high { border-left-color: var(--color-yellow); }
 .ticket.priority-urgent { border-left-color: var(--color-error); animation: urgentPulse 1.8s ease infinite; }
@@ -365,7 +406,7 @@ table.data-table tbody tr:hover { background: var(--bg-surface-2); }
 /* ---------- Stat tiles ---------- */
 .stat-tile { padding: 18px; display: flex; flex-direction: column; gap: 6px; }
 .stat-tile .stat-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 6px; }
-.stat-tile .stat-value { font-size: 24px; font-weight: 800; }
+.stat-tile .stat-value { font-size: 24px; font-weight: 700; }
 .stat-tile .stat-label { font-size: 12.5px; color: var(--text-secondary); font-weight: 600; }
 .stat-tile .stat-delta { font-size: 11.5px; font-weight: 700; }
 
@@ -389,8 +430,27 @@ table.data-table tbody tr:hover { background: var(--bg-surface-2); }
 .auth-wrap { min-height: calc(100vh - var(--nav-h)); min-height: calc(100dvh - var(--nav-h)); display: flex; align-items: center; justify-content: center; padding: 32px 16px; }
 .auth-card { width: 100%; max-width: 420px; padding: 32px; }
 .auth-tabs { display: flex; gap: 4px; background: var(--bg-surface-2); padding: 4px; border-radius: var(--radius-md); margin-bottom: 24px; }
-.auth-tab { flex: 1; text-align: center; padding: 10px; border-radius: var(--radius-sm); font-weight: 700; font-size: 13.5px; cursor: pointer; background: none; border: none; color: var(--text-secondary); }
+/* The inactive tab used plain var(--text-secondary) (a neutral grey) —
+   legible on paper, but next to the active tab's solid orange it read as
+   "greyed out"/disabled rather than "the other real option, just not
+   selected yet". A dimmed version of the same brand orange instead of a
+   different colour keeps both tabs visibly part of the same control. */
+.auth-tab { flex: 1; text-align: center; padding: 10px; border-radius: var(--radius-sm); font-weight: 700; font-size: 13.5px; cursor: pointer; background: none; border: none; color: rgba(255,107,0,0.55); }
 .auth-tab.active { background: var(--bg-surface); color: var(--color-primary); box-shadow: var(--shadow-sm); }
+
+/* "Continue with Google" — white surface + visible border regardless of
+   theme (Google's own brand guidelines require the button to stay
+   recognisable rather than following an app's dark mode), full-colour
+   "G" mark left exactly as Google publishes it. */
+.btn-google {
+  background: #fff; color: #1f1f1f; border: 1px solid #dadce0;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-weight: 600; font-size: 14px;
+}
+.btn-google:hover { background: #f8f8f8; }
+.btn-google:disabled { opacity: 0.7; }
+.auth-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--text-secondary); font-size: 12.5px; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-color); }
 .demo-box { background: var(--bg-surface-2); border-radius: var(--radius-md); padding: 12px 14px; font-size: 12px; margin-top: 18px; }
 .demo-box code { background: var(--bg-elevated); padding: 2px 6px; border-radius: 4px; }
 
@@ -414,3 +474,40 @@ table.data-table tbody tr:hover { background: var(--bg-surface-2); }
 .notif-item:hover { background: var(--bg-surface-2); }
 .notif-item.unread { background: rgba(255,107,0,0.06); }
 .notif-icon { width: 34px; height: 34px; border-radius: 50%; background: var(--bg-surface-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--color-primary); }
+
+/* ---------- Offline mode (js/app.js renderOfflineBanner, js/connectivity.js) ---------- */
+.offline-banner { display: flex; align-items: flex-start; gap: 8px; margin: 10px 16px 0; padding: 10px 14px; border-radius: var(--radius-md); background: rgba(255,193,7,0.14); border: 1px solid rgba(255,193,7,0.45); color: var(--text-primary); font-size: 13px; line-height: 1.4; }
+.offline-banner svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; color: var(--color-primary); }
+.offline-note { display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; border-radius: var(--radius-md); background: var(--bg-surface-2); border: 1px solid var(--border-color); color: var(--text-secondary); font-size: 13px; margin-bottom: 12px; }
+.offline-note svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
+.offline-note-page { margin: 12px 16px 0; }
+
+/* Image that failed to load (e.g. offline and never viewed before) —
+   shows the clickFud mark on a soft tile instead of a broken image. */
+img.img-fallback { object-fit: scale-down !important; box-sizing: border-box; padding: 0 !important; background: var(--bg-surface-2); opacity: 1 !important; }
+
+/* ---------- Campus tick-boxes + campus setup (js/shared-ui.js campusCheckboxes, js/pages/campus-setup.js) ---------- */
+.campus-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.campus-option { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1.5px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-surface); cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-primary); transition: border-color var(--transition-fast), background var(--transition-fast); user-select: none; }
+.campus-option input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.campus-option-box { width: 20px; height: 20px; flex-shrink: 0; border-radius: 6px; border: 1.5px solid var(--border-strong); display: flex; align-items: center; justify-content: center; background: var(--bg-surface); }
+.campus-option-box svg { width: 14px; height: 14px; color: #fff; opacity: 0; }
+.campus-option.checked { border-color: var(--color-primary); background: rgba(255,107,0,0.07); }
+.campus-option.checked .campus-option-box { background: var(--color-primary); border-color: var(--color-primary); }
+.campus-option.checked .campus-option-box svg { opacity: 1; }
+.campus-option:focus-within { outline: 2px solid var(--color-primary-light); outline-offset: 1px; }
+.campus-setup-card { max-width: 460px; }
+.campus-setup-title { font-size: 22px; font-weight: 800; text-align: center; margin: 0 0 6px; }
+.required-mark { color: var(--color-error); }
+
+/* ---------- Timetable sharing (js/timetable-share.js) ---------- */
+.tt-share-link { font-size: 12.5px; word-break: break-all; padding: 10px 12px; border-radius: var(--radius-md); background: var(--bg-surface-2); border: 1px dashed var(--border-strong); color: var(--text-secondary); margin-bottom: 14px; user-select: all; }
+.tt-share-actions { display: flex; flex-direction: column; gap: 8px; }
+.btn-whatsapp { background: #25D366; color: #fff; border-color: #25D366; text-decoration: none; }
+.btn-whatsapp:hover { background: #1fb959; color: #fff; }
+.tt-share-preview { max-height: 42vh; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 4px 12px; background: var(--bg-surface); }
+.tt-share-day { padding: 8px 0; border-bottom: 1px solid var(--border-color); }
+.tt-share-day:last-child { border-bottom: none; }
+.tt-share-day-name { font-size: 12px; font-weight: 800; color: var(--color-primary); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.tt-share-class { display: flex; gap: 10px; font-size: 13.5px; line-height: 1.4; padding: 3px 0; }
+.tt-share-time { flex-shrink: 0; min-width: 88px; font-variant-numeric: tabular-nums; color: var(--text-secondary); font-weight: 600; }

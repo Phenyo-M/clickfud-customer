@@ -8,3 +8,6 @@
 
 # Supabase CLI local link/cache state (machine-specific, not app source)
 supabase/.temp
+
+# Supabase CLI cache created when the CLI is run from inside supabase/functions
+supabase/functions/supabase/

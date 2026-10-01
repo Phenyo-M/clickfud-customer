@@ -20,7 +20,7 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY")!;
 const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY")!;
-const vapidSubject = Deno.env.get("VAPID_SUBJECT") || "mailto:support@campuseats.app";
+const vapidSubject = Deno.env.get("VAPID_SUBJECT") || "https://clickfud-customer.vercel.app";
 
 webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 
@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     const payload = JSON.stringify({
       title,
       body,
-      tag: tag || "campus-eats",
+      tag: tag || "clickfud",
       data: data || {},
     });
 

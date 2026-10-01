@@ -7,7 +7,14 @@ App.Reviews = (function () {
   const S = App.Store;
 
   async function fetchAll() {
-    const { data, error } = await App.sb.from('reviews').select('*').order('created_at', { ascending: false });
+    // RLS only ever shows a customer their OWN reviews (and a guest none),
+    // so ask for exactly that: a guest skips the query entirely (it cost
+    // ~0.4s of database time per page load to return nothing), and the
+    // explicit customer_id filter lets Postgres use idx on customer_id
+    // instead of re-checking the policy against every review row.
+    const uid = S.state.profile && S.state.profile.id;
+    if (!uid) { S.set({ reviews: [] }); return; }
+    const { data, error } = await App.sb.from('reviews').select('*').eq('customer_id', uid).order('created_at', { ascending: false });
     if (error) { console.error(error); return; }
     S.set({ reviews: data || [] });
   }

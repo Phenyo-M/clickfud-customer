@@ -6,8 +6,19 @@ window.App = window.App || {};
 App.Menu = (function () {
   const S = App.Store;
 
+  // Column list, not select('*') — same reasoning as js/stores.js
+  // fetchAll(): this runs on every page load for every visitor, and this
+  // is usually the larger of the two payloads (many items per store).
+  // Ordering by created_at still works with it left out of the select —
+  // PostgREST sorts server-side against the real column regardless of
+  // projection. submitted_at/approved_at/rejected_at/suspended_at/
+  // rejection_reason/created_at are moderation-queue fields only ever
+  // read by the developer app's own separate copy of this file, never
+  // this one.
+  const LIST_COLUMNS = 'id, name, category, price, platform_fee_amount, image, description, ingredients, allergens, preparation_time, available, stock, low_stock_threshold, rating, rating_count, store_id, status';
+
   async function fetchAll() {
-    const { data, error } = await App.sb.from('menu_items').select('*').order('created_at', { ascending: true });
+    const { data, error } = await App.sb.from('menu_items').select(LIST_COLUMNS).order('created_at', { ascending: true });
     if (error) { console.error(error); S.set({ dataLoadError: true }); return; }
     S.set({ menu: data || [] });
   }

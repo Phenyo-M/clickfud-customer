@@ -6,8 +6,19 @@ window.App = window.App || {};
 App.Stores = (function () {
   const S = App.Store;
 
+  // Column list, not select('*') — this runs on every page load for
+  // every visitor (App.Bootstrap.loadPublicData()), so it's the single
+  // hottest query in the app. Audited against every file this app
+  // actually loads (index.html) for real field usage — manager_id/slug
+  // are write-only (never read off a fetched row), updated_at/
+  // publish_requested_at/publish_rejection_reason aren't read anywhere
+  // live. Never remove a column from here without re-checking that
+  // audit; leftover role-page files elsewhere in js/pages/ (developer.js,
+  // manager.js, etc.) are NOT loaded by index.html and don't count.
+  const LIST_COLUMNS = 'id, name, description, category, logo_url, cover_image_url, contact_phone, contact_email, campus_location, accepts_delivery, accepts_collection, delivery_fee, prep_time_min, prep_time_max, rating, rating_count, opening_time, closing_time, closed_days, store_closed, closure_reason, status, rejection_reason, university, is_published, rating_breakdown';
+
   async function fetchAll() {
-    const { data, error } = await App.sb.from('stores').select('*').order('name');
+    const { data, error } = await App.sb.from('stores').select(LIST_COLUMNS).order('name');
     if (error) { console.error(error); S.set({ dataLoadError: true }); return; }
     S.set({ stores: data || [] });
   }
@@ -149,6 +160,14 @@ App.Stores = (function () {
     const [ch, cm] = store.closing_time.split(':').map(Number);
     const openMins = oh * 60 + om, closeMins = ch * 60 + cm;
     const nowMins = now.getHours() * 60 + now.getMinutes();
+    // Overnight hours (e.g. 20:00-02:00) — closing time is numerically
+    // earlier than opening time because it's really "the next day". The
+    // plain nowMins >= openMins && nowMins < closeMins check below can
+    // never be true for ANY time in that case (nothing is both >= 1200
+    // and < 120), so the shop would look permanently closed no matter
+    // what hours were actually set. Split into two ranges instead: open
+    // from opening time through midnight, then midnight through closing.
+    if (closeMins <= openMins) return nowMins >= openMins || nowMins < closeMins;
     return nowMins >= openMins && nowMins < closeMins;
   }
 

@@ -477,7 +477,7 @@ App.Pages.Manager = (function () {
         <div class="field"><label>Description</label><textarea class="input" name="description" rows="2">${U.escapeHtml(st.description || '')}</textarea></div>
         <div class="flex gap-2">
           <div class="field" style="flex:1"><label>Contact Phone</label><input class="input" name="contact_phone" value="${U.escapeHtml(st.contact_phone || '')}" placeholder="e.g. 011 234 5678" /></div>
-          <div class="field" style="flex:1"><label>Contact Email</label><input class="input" name="contact_email" type="email" value="${U.escapeHtml(st.contact_email || '')}" placeholder="e.g. store@campuseats.com" /></div>
+          <div class="field" style="flex:1"><label>Contact Email</label><input class="input" name="contact_email" type="email" value="${U.escapeHtml(st.contact_email || '')}" placeholder="e.g. yourshop@gmail.com" /></div>
         </div>
         <h3 class="font-bold mb-2" style="margin-top:8px;">Store Branding</h3>
         <div class="flex gap-2">
@@ -512,7 +512,7 @@ App.Pages.Manager = (function () {
           <div class="field"><label>Campus Location</label><input class="input" name="campus_location" value="${U.escapeHtml(v.campus_location)}" placeholder="e.g. South Campus" required /></div>
           <div class="flex gap-2">
             <div class="field" style="flex:1"><label>Business Phone</label><input class="input" name="contact_phone" value="${U.escapeHtml(v.contact_phone || '')}" placeholder="e.g. 011 234 5678" required /></div>
-            <div class="field" style="flex:1"><label>Business Email</label><input class="input" type="email" name="contact_email" value="${U.escapeHtml(v.contact_email || '')}" placeholder="e.g. store@campuseats.com" required /></div>
+            <div class="field" style="flex:1"><label>Business Email</label><input class="input" type="email" name="contact_email" value="${U.escapeHtml(v.contact_email || '')}" placeholder="e.g. yourshop@gmail.com" required /></div>
           </div>
           <div class="field">
             <label>Is your business officially registered?</label>

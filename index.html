@@ -4,22 +4,24 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>clickFud</title>
-<meta name="description" content="Order food from campus kitchens, track delivery live, and manage the whole operation." />
+<meta name="description" content="Order food from campus food shops, skip the queue, and collect your meal when it’s ready." />
 <link rel="icon" href="icons/clickfud-logo-full-512.png" type="image/png">
 <link rel="manifest" href="manifest.json" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="clickFud" />
 <link rel="apple-touch-icon" href="icons/clickfud-logo-full-512.png" />
-<link rel="stylesheet" href="css/base.css?v=20260920h" />
-<link rel="stylesheet" href="css/components.css?v=20260920h" />
-<link rel="stylesheet" href="css/dashboards.css?v=20260920h" />
-<link rel="stylesheet" href="css/home.css?v=20260920h" />
-<link rel="stylesheet" href="css/fudbot.css?v=20260920h" />
+<link rel="stylesheet" href="css/base.css?v=20260928b" />
+<link rel="stylesheet" href="css/components.css?v=20260929d" />
+<link rel="stylesheet" href="css/dashboards.css?v=20260927a" />
+<link rel="stylesheet" href="css/home.css?v=20260929h" />
+<link rel="stylesheet" href="css/onboarding.css?v=20260927b" />
 </head>
 <body>
 
 <div id="app-nav-root"></div>
 <div id="sidebar-root"></div>
+
+<div id="offline-banner-root"></div>
 
 <main id="app" role="main"></main>
 
@@ -28,40 +30,50 @@
 <div id="modal-root" aria-live="polite"></div>
 <div id="image-viewer-root"></div>
 <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
-<div id="fudbot-root"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/lucide@0.462.0/dist/umd/lucide.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <!-- Cache-busting query string (?v=) — bump on every future deploy so
      mobile browsers/PWAs never serve stale JS after an update. -->
-<script src="js/config.js?v=20260920h"></script>
-<script src="js/supabaseClient.js?v=20260920h"></script>
-<script src="js/utils.js?v=20260920h"></script>
-<script src="js/store.js?v=20260920h"></script>
-<script src="js/upload.js?v=20260920h"></script>
-<script src="js/toast.js?v=20260920h"></script>
-<script src="js/image-viewer.js?v=20260920h"></script>
-<script src="js/auth.js?v=20260920h"></script>
-<script src="js/notifications.js?v=20260920h"></script>
-<script src="js/stores.js?v=20260920h"></script>
-<script src="js/top-advert.js?v=20260920h"></script>
-<script src="js/menu.js?v=20260920h"></script>
-<script src="js/item-extras.js?v=20260920h"></script>
-<script src="js/addons.js?v=20260920h"></script>
-<script src="js/push.js?v=20260920h"></script>
-<script src="js/settings.js?v=20260920h"></script>
-<script src="js/promotions.js?v=20260920h"></script>
-<script src="js/orders.js?v=20260920h"></script>
-<script src="js/payments.js?v=20260920h"></script>
-<script src="js/reviews.js?v=20260920h"></script>
-<script src="js/shared-ui.js?v=20260920h"></script>
-<script src="js/fudbot.js?v=20260920h"></script>
-<script src="js/pages/auth-pages.js?v=20260920h"></script>
-<script src="js/pages/wrong-app.js?v=20260920h"></script>
-<script src="js/pages/home.js?v=20260920h"></script>
-<script src="js/pages/customer.js?v=20260920h"></script>
-<script src="js/nav.js?v=20260920h"></script>
-<script src="js/app.js?v=20260920h"></script>
+<script src="js/config.js?v=20260929u"></script>
+<script src="js/supabaseClient.js?v=20260921d"></script>
+<script src="js/utils.js?v=20260929e"></script>
+<script src="js/store.js?v=20260929c"></script>
+<script src="js/offline-cache.js?v=20260928e"></script>
+<script src="js/connectivity.js?v=20260928a"></script>
+<script src="js/upload.js?v=20260921d"></script>
+<script src="js/toast.js?v=20260921d"></script>
+<script src="js/image-viewer.js?v=20260921d"></script>
+<script src="js/auth.js?v=20260930a"></script>
+<script src="js/notifications.js?v=20260929w"></script>
+<script src="js/stores.js?v=20260923a"></script>
+<script src="js/home-page-media.js?v=20260926a"></script>
+<script src="js/menu.js?v=20260924a"></script>
+<script src="js/item-extras.js?v=20260921d"></script>
+<script src="js/addons.js?v=20260921d"></script>
+<script src="js/push.js?v=20260921d"></script>
+<script src="js/settings.js?v=20260921d"></script>
+<script src="js/promotions.js?v=20260929o"></script>
+<script src="js/orders.js?v=20260929l"></script>
+<script src="js/payments.js?v=20260929r"></script>
+<script src="js/reviews.js?v=20260928f"></script>
+<script src="js/orientation-campuses.js?v=20260925b"></script>
+<script src="js/orientation-location.js?v=20260925a"></script>
+<script src="js/orientation-providers.js?v=20260926c"></script>
+<script src="js/orientation-maps-launcher.js?v=20260926d"></script>
+<script src="js/timetable.js?v=20260929d"></script>
+<script src="js/shared-ui.js?v=20260930c"></script>
+<script src="js/pages/auth-pages.js?v=20260929f"></script>
+<script src="js/pages/wrong-app.js?v=20260928b"></script>
+<script src="js/pages/home.js?v=20260930c"></script>
+<script src="js/pages/orientation.js?v=20260926i"></script>
+<script src="js/pages/timetable.js?v=20260929d"></script>
+<script src="js/timetable-share.js?v=20260929d"></script>
+<script src="js/pages/customer.js?v=20260930c"></script>
+<script src="js/pages/onboarding.js?v=20260930c"></script>
+<script src="js/pages/campus-setup.js?v=20260929g"></script>
+<script src="js/nav.js?v=20260926a"></script>
+<script src="js/app.js?v=20260930b"></script>
 </body>
 </html>

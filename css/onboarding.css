@@ -1,0 +1,148 @@
+/* ============================================================
+   CLICKFUD — first-time welcome/onboarding screen ("Page 0")
+   One full-viewport screen, mobile-first. Uses only the existing
+   design tokens (base.css :root) — no new colors introduced.
+   ============================================================ */
+
+.onboarding-screen {
+  min-height: 100dvh;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-body);
+  padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+}
+
+.onboarding-top {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+  flex-shrink: 0;
+}
+
+/* A deep, moody radial gradient rather than a flat two-tone orange card —
+   the charcoal edges give the orange somewhere to recede into, which is
+   what makes it read as considered rather than a stock "bright orange
+   rounded rectangle" template card. No repeating dot texture and no
+   decorative sticker text — both were the actual tell that this was an
+   auto-generated placeholder rather than a designed screen; the brand
+   mark alone, given room to breathe, carries more weight than either. */
+.onboarding-media {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 180px;
+  max-height: 300px;
+  margin: 16px 0;
+  border-radius: var(--radius-lg);
+  background: radial-gradient(120% 130% at 50% 28%, var(--color-primary-dark) 0%, var(--color-charcoal) 76%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 24px 48px -16px rgba(30,30,36,0.5);
+}
+/* A soft warm glow behind the badge instead of a flat fill — depth
+   without adding another decorative layer on top of it. */
+.onboarding-media::before {
+  content: '';
+  position: absolute;
+  width: 230px;
+  height: 230px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,150,60,0.55) 0%, transparent 72%);
+  filter: blur(4px);
+}
+.onboarding-media-badge {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.onboarding-media-badge img { width: 58px; height: 58px; object-fit: contain; display: block; }
+
+.onboarding-content {
+  flex-shrink: 0;
+  text-align: center;
+}
+.onboarding-eyebrow {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+.onboarding-headline {
+  margin: 0 0 10px;
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.onboarding-highlight { color: var(--color-primary); }
+.onboarding-sub {
+  margin: 0 auto 20px;
+  max-width: 380px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.onboarding-benefits {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  margin: 0 0 8px;
+}
+.onboarding-benefit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 84px;
+}
+.onboarding-benefit-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--bg-surface-2);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.onboarding-bottom {
+  flex-shrink: 0;
+  padding-top: 20px;
+}
+.onboarding-next-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  font-size: 16px;
+}
+
+@media (min-width: 640px) {
+  .onboarding-screen { align-items: center; }
+  .onboarding-top, .onboarding-media, .onboarding-content, .onboarding-bottom {
+    width: 100%;
+    max-width: 440px;
+  }
+  .onboarding-media { max-height: 320px; }
+}

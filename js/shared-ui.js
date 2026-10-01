@@ -10,7 +10,7 @@ App.Shared = (function () {
 
   const STATUS_ICON = {
     received: 'receipt', preparing: 'chef-hat', ready: 'package-check',
-    out_for_delivery: 'bike', delivered: 'party-popper', collected: 'party-popper', cancelled: 'x-circle',
+    out_for_delivery: 'bike', delivered: 'party-popper', collected: 'party-popper', cancelled: 'x-circle', uncollected: 'clock',
   };
 
   // Official clickFud brand artwork (the uploaded logo), cropped once into
@@ -36,7 +36,7 @@ App.Shared = (function () {
   // brand name — pairing it with a separate text label next to it would
   // just duplicate the name beside itself. wordmark:false renders just the
   // icon, for contexts that supply their own text.
-  function CampusEatsLogo(opts) {
+  function ClickFudLogo(opts) {
     opts = opts || {};
     const size = opts.size || 'md';
     const wordmark = opts.wordmark !== false;
@@ -47,10 +47,42 @@ App.Shared = (function () {
     }
     const badgeDims = { sm: 30, md: 56, lg: 96 };
     const px = badgeDims[size] || badgeDims.md;
-    return `<span class="ce-logo-badge" style="width:${px}px;height:${px}px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+    return `<span class="cf-logo-badge" style="width:${px}px;height:${px}px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
       <img src="icons/clickfud-icon-192.png" alt="clickFud" style="width:100%;height:100%;object-fit:contain;display:block;" />
     </span>`;
   }
+
+  // ---- Campus tick-boxes (signup, campus setup, profile) ----
+  // A student may attend several campuses, so this is a tick-box list, not
+  // a dropdown. The ticked state lives here (keyed by `group`), not only
+  // in the DOM — App.render() rebuilds the page on every state change
+  // (a realtime menu update, a toast…), which would otherwise silently
+  // untick boxes the student had just ticked but not yet submitted.
+  const campusSelections = {};
+  function campusCheckboxes({ group, university, initial }) {
+    const campuses = App.CONST.UNIVERSITY_CAMPUSES[university] || [];
+    if (!campusSelections[group]) campusSelections[group] = new Set(initial || []);
+    const sel = campusSelections[group];
+    return `<div class="campus-options" role="group">
+      ${campuses.map(c => `
+      <label class="campus-option ${sel.has(c) ? 'checked' : ''}">
+        <input type="checkbox" name="campuses" value="${U.escapeHtml(c)}" data-campus-group="${U.escapeHtml(group)}" ${sel.has(c) ? 'checked' : ''} />
+        <span class="campus-option-box"><i data-lucide="check"></i></span>
+        <span>${U.escapeHtml(c)}</span>
+      </label>`).join('')}
+    </div>`;
+  }
+  function selectedCampuses(group) { return campusSelections[group] ? [...campusSelections[group]] : []; }
+  function resetCampusSelection(group) { delete campusSelections[group]; }
+  document.addEventListener('change', (e) => {
+    const box = e.target.closest && e.target.closest('input[data-campus-group]');
+    if (!box) return;
+    const group = box.dataset.campusGroup;
+    if (!campusSelections[group]) campusSelections[group] = new Set();
+    if (box.checked) campusSelections[group].add(box.value); else campusSelections[group].delete(box.value);
+    const label = box.closest('.campus-option');
+    if (label) label.classList.toggle('checked', box.checked);
+  });
 
   function defaultRouteForRole(role) {
     switch (role) {
@@ -82,60 +114,6 @@ App.Shared = (function () {
   }
 
   // ---------------- Profile dropdown menu ----------------
-  // Same self-positioning technique as the Staff app's custom-select
-  // (panel appended to <body>, positioned from the trigger's own rect) —
-  // avoids ever being clipped/misplaced by an ancestor's overflow.
-  let openMenu = null;
-
-  function closeProfileMenu() {
-    if (openMenu) { openMenu.cleanup(); openMenu = null; }
-  }
-
-  function toggleProfileMenu(triggerEl) {
-    if (openMenu) { closeProfileMenu(); return; }
-    const rect = triggerEl.getBoundingClientRect();
-    const panel = document.createElement('div');
-    panel.className = 'profile-menu-panel';
-    panel.innerHTML = `
-      <button type="button" class="profile-menu-item" data-action="go-profile"><i data-lucide="user"></i>Profile</button>
-      <button type="button" class="profile-menu-item" data-action="go-profile"><i data-lucide="settings"></i>Settings</button>
-      <div class="profile-menu-divider"></div>
-      <button type="button" class="profile-menu-item danger" data-action="logout"><i data-lucide="log-out"></i>Logout</button>
-    `;
-    document.body.appendChild(panel);
-    const panelWidth = panel.offsetWidth;
-    panel.style.top = (rect.bottom + 8) + 'px';
-    panel.style.left = Math.max(8, rect.right - panelWidth) + 'px';
-    triggerEl.classList.add('open');
-    if (window.lucide) lucide.createIcons({ context: panel });
-
-    // Menu items are handled by the app's normal global click delegation
-    // (go-profile/logout) — just close the panel once one is chosen.
-    panel.addEventListener('click', (e) => { if (e.target.closest('[data-action]')) closeProfileMenu(); });
-
-    function onOutside(e) {
-      if (panel.contains(e.target) || triggerEl.contains(e.target)) return;
-      closeProfileMenu();
-    }
-    function onDismiss() { closeProfileMenu(); }
-    document.addEventListener('mousedown', onOutside, true);
-    document.addEventListener('keydown', onEscape);
-    window.addEventListener('resize', onDismiss);
-    window.addEventListener('scroll', onDismiss, true);
-    function onEscape(e) { if (e.key === 'Escape') closeProfileMenu(); }
-
-    openMenu = {
-      cleanup() {
-        document.removeEventListener('mousedown', onOutside, true);
-        document.removeEventListener('keydown', onEscape);
-        window.removeEventListener('resize', onDismiss);
-        window.removeEventListener('scroll', onDismiss, true);
-        panel.remove();
-        triggerEl.classList.remove('open');
-      },
-    };
-  }
-
   // ---------------- Top app nav ----------------
   function renderAppNav() {
     const profile = S.state.profile;
@@ -161,29 +139,27 @@ App.Shared = (function () {
           ${unread > 0 ? `<span class="bell-dot">${unread > 9 ? '9+' : unread}</span>` : ''}
         </button>`;
       if (profile.role === 'customer') {
+        // Everything that isn't notifications/search (RecessBox, My
+        // Orientation, My Timetable, theme, profile, settings, logout)
+        // lives on its own full "More" page (js/pages/customer.js
+        // renderMorePage()) rather than a small dropdown panel. Cart is
+        // deliberately NOT a persistent icon here any more — the only
+        // cart affordance is the "View Cart • N items" bar (see
+        // renderBottomNav()'s floating-cart-btn), which only exists at
+        // all while the cart actually has something in it.
         actions += `
-        <button class="btn-icon bell-btn" data-action="open-cart" aria-label="Cart">
-          <i data-lucide="shopping-cart"></i>
-          ${cartCount > 0 ? `<span class="bell-dot">${cartCount}</span>` : ''}
-        </button>`;
-      }
-      actions += `<button class="btn-icon" data-action="toggle-theme" aria-label="Toggle theme"><i data-lucide="${S.state.theme === 'dark' ? 'sun' : 'moon'}"></i></button>`;
-      if (profile.role === 'customer') {
-        actions += `
-        <button type="button" class="profile-trigger" data-action="toggle-profile-menu">
-          ${avatar(profile, 34)}
-          <span class="profile-trigger-name hidden-xs">Hey, ${U.escapeHtml(firstName(profile))}</span>
-          <i data-lucide="chevron-down" style="width:15px;height:15px;"></i>
+        <button type="button" class="btn-icon nav-menu-btn" data-action="navigate" data-view="more" aria-label="More">
+          <i data-lucide="menu"></i>
         </button>`;
       } else {
-        actions += `
+        actions += `<button class="btn-icon" data-action="toggle-theme" aria-label="Toggle theme"><i data-lucide="${S.state.theme === 'dark' ? 'sun' : 'moon'}"></i></button>
         <button class="btn-icon" data-action="go-profile" aria-label="Profile" style="padding:0;border:none;background:none;">${avatar(profile, 36)}</button>
         <button class="btn btn-secondary btn-sm" data-action="logout"><i data-lucide="log-out"></i><span class="hidden-xs">Logout</span></button>`;
       }
     } else {
       actions += `
         <button class="btn-icon" data-action="toggle-theme" aria-label="Toggle theme"><i data-lucide="${S.state.theme === 'dark' ? 'sun' : 'moon'}"></i></button>
-        <button class="btn btn-ghost btn-sm" data-action="go-auth" data-tab="login">Log In</button>
+        <button class="btn btn-secondary btn-sm" data-action="go-auth" data-tab="login">Log In</button>
         <button class="btn btn-primary btn-sm" data-action="go-auth" data-tab="signup">Sign Up</button>`;
     }
 
@@ -211,6 +187,8 @@ App.Shared = (function () {
       { view: 'home', icon: 'home', label: 'Home' },
       { view: 'search', icon: 'search', label: 'Search' },
       { view: 'orders', icon: 'receipt', label: 'Orders' },
+      { view: 'orientation', icon: 'compass', label: 'My Orientation' },
+      { view: 'timetable', icon: 'calendar', label: 'My Timetable' },
       { view: 'cart', icon: 'shopping-cart', label: 'Cart', badge: cartCount, action: 'open-cart' },
       { view: 'profile', icon: 'user', label: 'Profile' },
       { view: 'settings', icon: 'settings', label: 'Settings', action: 'go-profile' },
@@ -243,14 +221,12 @@ App.Shared = (function () {
       items = [
         { view: 'home', icon: 'home', label: 'Home', action: 'go-home' },
         { view: 'orders', icon: 'receipt', label: 'Orders', action: 'guest-nav-orders' },
-        { view: 'favorites', icon: 'heart', label: 'Favourite', action: 'guest-nav-favorites' },
+        { view: 'favorites', icon: 'heart', label: 'Saved', action: 'guest-nav-favorites' },
         { view: 'profile', icon: 'user', label: 'Profile', action: 'guest-nav-profile' },
       ];
     } else if (profile.role === 'customer') {
       // Cart is the raised centre FAB (below), same as the guest nav —
-      // no separate inline Cart tab, and FudBot is its own floating
-      // button on the right (js/fudbot.js), not a nav item — one cart
-      // affordance and one chat affordance, each in one place.
+      // no separate inline Cart tab.
       items = [
         { view: 'home', icon: 'home', label: 'Home' },
         { view: 'search', icon: 'search', label: 'Search' },
@@ -281,19 +257,48 @@ App.Shared = (function () {
         { view: 'profile', icon: 'user', label: 'Profile' },
       ];
     }
-    // Raised centre cart button + scalloped notch — one consistent cart
-    // affordance for both a guest and a logged-in customer (previously
-    // guests got this FAB while customers had a separate inline Cart
-    // tab; now both use the same single button, badge and all).
-    const usesCartFab = !profile || profile.role === 'customer';
-    const cartCount = usesCartFab ? (S.state.cart || []).reduce((n, c) => n + c.qty, 0) : 0;
+    // Raised centre button + scalloped notch — a guest still gets the
+    // cart there (no account yet, so no My Orientation to show); a
+    // logged-in customer gets My Orientation instead (see section 5/6 of
+    // the brief this replaced — the cart must never retake this spot).
+    // Both share the exact same raised/notched shell, just a different
+    // button inside it.
+    const isGuestNav = !profile;
+    const isCustomer = !!profile && profile.role === 'customer';
+    const usesRaisedNav = isGuestNav || isCustomer;
+    const cartCount = (S.state.cart || []).reduce((n, c) => n + c.qty, 0);
+
+    const centerButton = isGuestNav
+      ? `<button type="button" class="bottom-nav-fab" data-action="open-cart" aria-label="View cart">
+          <i data-lucide="shopping-cart"></i>
+          ${cartCount ? `<span class="cart-count">${cartCount}</span>` : ''}
+        </button>`
+      : isCustomer
+      ? `<button type="button" class="bottom-nav-fab bottom-nav-fab-orientation ${route.view === 'orientation' ? 'active' : ''}" data-action="navigate" data-view="orientation" aria-label="My Orientation">
+          <span class="bottom-nav-fab-logo"><img src="icons/clickfud-icon-192.png" alt="" /></span>
+        </button>`
+      : '';
+
+    // Deliberately separate from centerButton above — a customer's cart
+    // must never replace My Orientation there. This is just a real,
+    // clickable summary of the SAME cart state (S.state.cart), reusing
+    // the .floating-cart-btn shell css/home.css already defines (and
+    // app.js's updateFixedBottomSpace() already measures) rather than a
+    // second cart widget — it only exists while the cart is non-empty,
+    // and disappears again the moment it's cleared. A plain text message,
+    // not a cart/trolley icon — the feedback for actually adding an item
+    // is the "Added to cart" toast at the moment it happens; this bar is
+    // just the way back into an already-nonempty cart, not a persistent
+    // icon+badge sitting on screen the way the old top-nav cart button did.
+    const viewCartBar = (isCustomer && cartCount > 0) ? `
+    <button type="button" class="floating-cart-btn" data-action="open-cart">
+      <span>View Cart &bull; ${cartCount} item${cartCount === 1 ? '' : 's'}</span>
+    </button>` : '';
+
     return `
-    <nav class="bottom-nav ${usesCartFab ? 'bottom-nav-guest' : ''}">
-      ${usesCartFab ? `
-      <button type="button" class="bottom-nav-fab" data-action="open-cart" aria-label="View cart">
-        <i data-lucide="shopping-cart"></i>
-        ${cartCount ? `<span class="cart-count">${cartCount}</span>` : ''}
-      </button>` : ''}
+    ${viewCartBar}
+    <nav class="bottom-nav ${usesRaisedNav ? 'bottom-nav-guest' : ''}">
+      ${centerButton}
       ${items.map(it => `
         <button class="bottom-nav-item ${route.view === it.view ? 'active' : ''}" data-action="${it.action || 'navigate'}" data-view="${it.view}">
           <i data-lucide="${it.icon}"></i><span>${it.label}</span>
@@ -359,7 +364,7 @@ App.Shared = (function () {
         ${cart.length ? `
         <div class="slideover-footer">
           <div class="cart-summary-row"><span>Subtotal</span><span>${U.money(subtotal)}</span></div>
-          <div class="text-xs text-muted mb-2">Delivery fee & discounts calculated at checkout.</div>
+          <div class="text-xs text-muted mb-2">Discounts are applied at checkout.</div>
           <button class="btn btn-secondary btn-block mb-2" data-action="clear-cart"><i data-lucide="trash-2"></i>Clear Cart</button>
           <button class="btn btn-primary btn-block btn-lg" data-action="go-checkout">Checkout <i data-lucide="arrow-right"></i></button>
         </div>` : ''}
@@ -369,7 +374,10 @@ App.Shared = (function () {
   // ---------------- Order tracker ----------------
   function renderTracker(order) {
     if (order.status === 'cancelled') {
-      return `<div class="closed-banner"><i data-lucide="x-circle"></i><div><strong>Order Cancelled</strong><div class="text-sm">This order will not be prepared or delivered.</div></div></div>`;
+      return `<div class="closed-banner"><i data-lucide="x-circle"></i><div><strong>Order Cancelled</strong><div class="text-sm">This order will not be prepared.</div></div></div>`;
+    }
+    if (order.status === 'uncollected') {
+      return `<div class="closed-banner"><i data-lucide="clock"></i><div><strong>Not Collected</strong><div class="text-sm">This order wasn't collected in time and has been closed.</div></div></div>`;
     }
     const isCollection = order.delivery_location && order.delivery_location.fulfilment === 'collection';
     const flow = isCollection ? App.CONST.STATUS_FLOW_COLLECTION : App.CONST.STATUS_FLOW;
@@ -413,13 +421,18 @@ App.Shared = (function () {
       `).join('')}
       <hr>
       <div class="receipt-row"><span>Subtotal</span><span>${U.money(order.subtotal)}</span></div>
-      <div class="receipt-row"><span>Delivery Fee</span><span>${U.money(order.delivery_fee)}</span></div>
+      ${Number(order.delivery_fee) > 0 ? `<div class="receipt-row"><span>Delivery Fee</span><span>${U.money(order.delivery_fee)}</span></div>` : ''}
       ${order.discount ? `<div class="receipt-row"><span>Discount ${order.promo_code ? '(' + U.escapeHtml(order.promo_code) + ')' : ''}</span><span>-${U.money(order.discount)}</span></div>` : ''}
       <div class="receipt-row" style="font-weight:800;font-size:15px;"><span>Total</span><span>${U.money(order.total)}</span></div>
       <hr>
-      <div class="receipt-row"><span>Payment</span><span>${order.payment_method === 'cod' ? 'Cash on Delivery' : 'Card'}</span></div>
-      <div class="receipt-row"><span>Status</span><span>${order.payment_status}</span></div>
+      <div class="receipt-row"><span>Payment</span><span>${order.payment_method === 'cod' ? 'Cash' : 'Card'}</span></div>
+      <div class="receipt-row"><span>Status</span><span>${paymentStatusLabel(order.payment_status)}</span></div>
     </div>`;
+  }
+
+  function paymentStatusLabel(status) {
+    const labels = { paid: 'Paid', pending: 'Pending', refund_pending: 'Refund in progress', refunded: 'Refunded', refund_failed: 'Refund failed — contact support' };
+    return labels[status] || U.escapeHtml(status || '');
   }
 
   function openReceiptModal(order) {
@@ -427,6 +440,54 @@ App.Shared = (function () {
       <div class="modal-header"><span class="modal-title">Receipt</span><button class="modal-close" data-action="close-modal"><i data-lucide="x"></i></button></div>
       <div class="modal-body">${renderReceipt(order)}</div>
       <div class="modal-footer"><button class="btn btn-primary btn-block" data-action="print-receipt"><i data-lucide="printer"></i>Print / Save</button></div>`);
+  }
+
+  // ---------------- Payment verification modal ----------------
+  // The actual wait (Paystack's own verify call, then creating the order)
+  // can't be made instant — this replaces the easy-to-miss small toast with
+  // an unmissable, undismissable full modal so it's obvious the app is
+  // genuinely still working, not stuck or ignoring the tap. Closed by the
+  // caller once verification finishes (see js/app.js handlePaystackReturn),
+  // either replaced in place by openOrderSuccessModal on success (App.Modal
+  // updates the same overlay's content, no flicker) or via App.Modal.close()
+  // on failure.
+  function openVerifyingPaymentModal() {
+    App.Modal.open(`
+      <div class="modal-body" style="text-align:center;padding:40px 24px 34px;">
+        <div style="width:52px;height:52px;border-radius:50%;border:4px solid var(--bg-surface-2);border-top-color:var(--color-primary);margin:0 auto 20px;animation:spin 0.8s linear infinite;"></div>
+        <h2 style="font-size:18px;font-weight:800;margin-bottom:8px;">Verifying your payment</h2>
+        <p class="text-muted" style="font-size:14.5px;line-height:1.5;">We're still verifying your payment with Paystack — please wait a few moments. Don't close or refresh this page.</p>
+      </div>`, { closeOnOverlay: false });
+  }
+
+  // ---------------- Order success modal ----------------
+  // A real, full-screen-feeling confirmation after checkout — deliberately
+  // NOT just a toast (a toast fades in a couple seconds; a customer who
+  // just paid real/test money wants an unmissable "yes, this actually
+  // went through" moment, with a real order number, not a small popup
+  // they might not even notice).
+  // Called AFTER the route has already switched to the confirmation/
+  // tracking view underneath, so a single "Got it" is enough — there's
+  // nowhere else this needs to send them, the real order status is right
+  // there on the page as soon as the modal closes.
+  function openOrderSuccessModal({ count, orderNumber }) {
+    const title = count > 1 ? `${count} Orders Placed!` : 'Order Placed!';
+    const sub = count > 1
+      ? `Your ${count} orders have been successfully placed and sent to the kitchens.`
+      : orderNumber
+      ? `Order ${U.escapeHtml(orderNumber)} has been successfully placed and sent to the kitchen.`
+      : 'Your order has been successfully placed and sent to the kitchen.';
+    App.Modal.open(`
+      <div class="modal-body" style="text-align:center;padding:36px 24px 28px;">
+        <div class="icon-wrap" style="width:88px;height:88px;background:rgba(34,197,94,0.14);color:var(--color-success);margin:0 auto 18px;">
+          <i data-lucide="check-circle-2" style="width:48px;height:48px;"></i>
+        </div>
+        <h2 style="font-size:22px;font-weight:800;margin-bottom:8px;">${title}</h2>
+        <p class="text-muted" style="font-size:14.5px;line-height:1.5;">${sub}</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-block" data-action="close-modal">Got It</button>
+      </div>`, { closeOnOverlay: false });
   }
 
   // ---------------- Review modal ----------------
@@ -495,13 +556,35 @@ App.Shared = (function () {
       order_received: 'receipt', preparing: 'chef-hat', ready: 'package-check',
       out_for_delivery: 'bike', delivered: 'party-popper', order_cancelled: 'x-circle',
       delivery_available: 'bell-ring', promo: 'tag',
+      collection_expired: 'alarm-clock', order_rescheduled: 'calendar-clock', order_uncollected: 'clock',
     };
     return map[type] || 'bell';
   }
 
+  // "Are you still going to collect?" is answered right in the notification.
+  // The notification names the order; buttons only while the order is still
+  // waiting for that answer — afterwards it says what happened instead.
+  function missedCollectionReply(n) {
+    const num = (String(n.message).match(/ORD-\d{4}-\d+/) || [])[0];
+    const o = num && (S.state.orders || []).find(x => x.order_number === num);
+    if (!o) return '';
+    if (o.status === 'ready' && o.collection_state === 'expired') {
+      return `<div class="flex gap-2 mt-2" style="flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary btn-sm" data-action="missed-collect-yes" data-id="${o.id}">Yes, I'll still collect</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-action="missed-collect-no" data-id="${o.id}">No, I won't collect</button>
+      </div>`;
+    }
+    let done = '';
+    if (o.status === 'collected') done = 'Collected.';
+    else if (o.status === 'uncollected') done = 'Closed — not collected.';
+    else if (o.status === 'cancelled') done = "You said you won't collect it. Order cancelled.";
+    else if (o.rescheduled_for && (o.collection_state === 'rescheduled' || o.needs_reprep)) done = `Rescheduled for ${U.formatTime(o.rescheduled_for)}.`;
+    return done ? `<div class="text-xs mt-1" style="font-weight:600;color:var(--color-primary);">${U.escapeHtml(done)}</div>` : '';
+  }
+
   function openNotifications() {
     openPanelKind = 'notifications';
-    const list = S.state.notifications;
+    const list = App.Notifications.visible();
     const body = list.length === 0
       ? `<div class="empty-state"><div class="icon-wrap"><i data-lucide="bell-off"></i></div><h3>No notifications yet</h3><p>We'll let you know when something happens.</p></div>`
       : list.map(n => `
@@ -509,6 +592,7 @@ App.Shared = (function () {
           <div class="notif-icon"><i data-lucide="${notifIcon(n.type)}" style="width:16px;height:16px;"></i></div>
           <div style="flex:1">
             <div class="text-sm">${U.escapeHtml(n.message)}</div>
+            ${n.type === 'collection_expired' ? missedCollectionReply(n) : ''}
             <div class="text-xs text-muted mt-1">${U.timeAgo(n.created_at)}</div>
           </div>
         </div>`).join('');
@@ -556,9 +640,10 @@ App.Shared = (function () {
   }
 
   return {
-    STATUS_ICON, defaultRouteForRole, avatar, greetingText, logoBadge, CampusEatsLogo,
-    renderAppNav, renderBottomNav, renderCustomerSidebar, toggleProfileMenu,
-    openCart, renderTracker, renderReceipt, openReceiptModal,
+    STATUS_ICON, defaultRouteForRole, avatar, greetingText, logoBadge, ClickFudLogo,
+    campusCheckboxes, selectedCampuses, resetCampusSelection,
+    renderAppNav, renderBottomNav, renderCustomerSidebar,
+    openCart, renderTracker, renderReceipt, openReceiptModal, openOrderSuccessModal, openVerifyingPaymentModal,
     openReviewModal, setReviewStar, submitReview,
     openNotifications, refreshOpenPanel, renderStaffProfile, handleStaffProfileSubmit,
   };

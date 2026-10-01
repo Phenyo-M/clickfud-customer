@@ -130,6 +130,7 @@ Deno.serve(async (req) => {
 
     return json({ data: { id: finalUser.id, name: `${store.name} Kitchen`, email } });
   } catch (e) {
+    console.error(e);
     return json({ error: "Something went wrong creating this account." }, 500);
   }
 });

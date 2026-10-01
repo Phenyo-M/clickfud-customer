@@ -1136,6 +1136,20 @@ create table if not exists public.login_attempts (
 );
 
 alter table public.login_attempts enable row level security;
+
+-- ============================================================
+-- 33. FIX — failed_count above had no time-based reset for attempts
+-- below the lockout threshold: it only reset on a successful login or
+-- once an active lockout naturally expired. Unrelated failures spread
+-- across days (a typo one week, a forgotten password the next) silently
+-- compounded into a lockout that then appeared on what felt like a
+-- first attempt — confirmed live against a real account. The
+-- requirement is "5 failures within a rolling 10-minute window," so
+-- individual failure timestamps are needed, not just a running total.
+-- secure-login now keeps this capped to the last 10 minutes on every
+-- check; anything older rolls off on its own.
+-- ============================================================
+alter table public.login_attempts add column if not exists attempt_times jsonb not null default '[]'::jsonb;
 -- Deliberately no policies at all — default-deny for every client role.
 
 -- ============================================================
@@ -1664,6 +1678,25 @@ drop policy if exists "orders customer cancel" on public.orders;
 -- ============================================================
 alter table public.profiles add column if not exists campus_location text;
 
+-- ============================================================
+-- 32. SECURITY FIX — handle_new_user() had a dead-but-exploitable
+-- branch: any raw_user_meta_data.store_name that matched an existing
+-- store's name got that store's profiles.store_id auto-assigned AND
+-- immediately wrote stores.manager_id = new.id (if the store had no
+-- manager yet). The real, legitimate registration flow (Staff app's
+-- App.Stores.create(), js/stores.js) never sends store_name at
+-- signup — it creates the store with manager_id set to the ALREADY-
+-- authenticated caller's own id, then links profile.store_id
+-- separately, both scoped to that caller. Grepped all three apps'
+-- frontend code end to end: nothing legitimately sends store_name at
+-- signup. That made this purely an attack surface — anyone could call
+-- supabase.auth.signUp() directly (bypassing the UI, which nothing
+-- prevents) with {role:'manager', store_name:'<some existing,
+-- not-yet-linked shop>'} and take real control of that shop with zero
+-- developer review. Removed entirely; store_id is now always null at
+-- signup, exactly like a normal customer/driver account, and only
+-- ever gets set afterward through the real, self-scoped flow.
+-- ============================================================
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -1671,7 +1704,6 @@ security definer
 set search_path = public
 as $$
 declare
-  v_store_id uuid;
   v_requested_role text;
   v_role text;
   v_status text;
@@ -1696,10 +1728,6 @@ begin
     v_role := 'customer';
   end if;
 
-  if new.raw_user_meta_data->>'store_name' is not null then
-    select id into v_store_id from public.stores where name = new.raw_user_meta_data->>'store_name';
-  end if;
-
   insert into public.profiles (id, name, email, role, phone, store_id, university, campus_location, status)
   values (
     new.id,
@@ -1707,16 +1735,12 @@ begin
     new.email,
     v_role,
     new.raw_user_meta_data->>'phone',
-    v_store_id,
+    null,
     new.raw_user_meta_data->>'university',
     new.raw_user_meta_data->>'campus_location',
     v_status
   )
   on conflict (id) do nothing;
-
-  if v_store_id is not null and v_role = 'manager' then
-    update public.stores set manager_id = new.id where id = v_store_id and manager_id is null;
-  end if;
 
   return new;
 end;
@@ -3019,3 +3043,1787 @@ drop trigger if exists trg_protect_publish_gate on public.stores;
 create trigger trg_protect_publish_gate
   before update on public.stores
   for each row execute procedure public.protect_publish_gate();
+
+-- ============================================================
+-- 37. Scalability indexes — targets the queries that actually run on
+-- EVERY page load for EVERY visitor (App.Bootstrap.loadPublicData() in
+-- the customer app: Stores.fetchAll()/Menu.fetchAll(), filtered
+-- server-side by RLS to approved+published stores and approved menu
+-- items), plus the other genuinely hot lookups (profiles by role/status
+-- — driver/developer approval queues and the customer-count stat all
+-- filter on this with no index today; orders/audit_log ordered by
+-- created_at with no index backing that sort; reviews by store_id for
+-- the rating rollup). None of this changes behavior — pure additive
+-- indexes, safe to run any time, purely a query-speed fix for handling
+-- meaningfully more concurrent users than the handful of real rows this
+-- project has had so far.
+-- ============================================================
+create index if not exists idx_stores_status_published on public.stores(status, is_published);
+create index if not exists idx_stores_university on public.stores(university);
+create index if not exists idx_menu_items_status on public.menu_items(status);
+create index if not exists idx_profiles_role on public.profiles(role);
+create index if not exists idx_profiles_role_status on public.profiles(role, status);
+create index if not exists idx_orders_created_at on public.orders(created_at desc);
+create index if not exists idx_audit_log_created_at on public.audit_log(created_at desc);
+create index if not exists idx_reviews_store on public.reviews(store_id);
+
+-- ============================================================
+-- 38. Auto-accept + honest dynamic ETA. A kitchen previously had to
+-- manually click "Start Preparing" on every single order before it
+-- entered the queue (js/pages/kitchen.js, the 'received' -> 'preparing'
+-- step) — real, human, one-click-per-order bottleneck: a burst of 50
+-- simultaneous orders is 50 clicks no kitchen can do instantly, no
+-- matter how fast the database is. Orders now go straight to
+-- 'preparing' the moment they're placed (the app still logs a
+-- 'received' history entry first, same instant, so the tracker's
+-- step-by-step display is unchanged) — the kitchen's real queue is
+-- exactly what's actually there, nothing gated behind a click.
+--
+-- estimated_ready_at is computed HERE, server-side, at insert time —
+-- not a static store.prep_time_max shown to every customer regardless
+-- of how busy the kitchen actually is. It's the store's own prep time
+-- PLUS a real per-order delay for every order already ahead of this one
+-- in that store's queue (status='preparing', not yet ready/cancelled),
+-- so a customer ordering into a slammed kitchen sees an honestly longer
+-- estimate instead of a number the kitchen can't possibly hit.
+-- ============================================================
+alter table public.orders add column if not exists estimated_ready_at timestamptz;
+
+create or replace function public.set_order_estimated_ready_at()
+returns trigger
+language plpgsql
+as $$
+declare
+  queue_ahead int;
+  store_prep_max int;
+  minutes_per_queued_order numeric := 3; -- realistic added kitchen time per order already ahead in the queue
+begin
+  select coalesce(prep_time_max, 20) into store_prep_max from public.stores where id = new.store_id;
+  select count(*) into queue_ahead from public.orders
+    where store_id = new.store_id and status = 'preparing';
+  new.estimated_ready_at := now() + (coalesce(store_prep_max, 20) + coalesce(queue_ahead, 0) * minutes_per_queued_order) * interval '1 minute';
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_set_order_estimated_ready_at on public.orders;
+create trigger trg_set_order_estimated_ready_at
+  before insert on public.orders
+  for each row execute procedure public.set_order_estimated_ready_at();
+
+-- ============================================================
+-- SECTION 39: One email = one account, enforced at the database level
+-- (2026-09-22)
+--
+-- This was ALREADY true structurally before this section: all three
+-- clickFud apps (customer/staff/developer) share this one Supabase
+-- project, every one of them creates accounts exclusively through
+-- App.sb.auth.signUp() (confirmed — no admin.createUser or direct
+-- profiles insert anywhere in any of the three codebases), and
+-- Supabase Auth itself already enforces email uniqueness at the
+-- database level regardless of role:
+--   - auth.users has a real UNIQUE index on email (users_email_partial_key,
+--     WHERE is_sso_user = false) — a second signUp() with the same email
+--     is rejected by Postgres itself, atomically, so two near-simultaneous
+--     registration requests cannot both succeed (the unique index is
+--     what actually resolves the race, not application code).
+--   - GoTrue (Supabase's auth server) normalizes email to lowercase
+--     before this check, so "Test@Example.com" and "test@example.com"
+--     already collide as the same account.
+--   - public.profiles.id is a 1:1 FK to auth.users.id, and the
+--     on_auth_user_created trigger's `insert ... on conflict (id) do
+--     nothing` means a profile can only ever be created alongside a
+--     genuinely new, unique auth user — never a second profile for an
+--     existing identity, regardless of what role is requested.
+-- Verified live before writing this: zero duplicate emails existed in
+-- auth.users at the time this was added.
+--
+-- What THIS section adds is defense-in-depth, not a fix for a real
+-- bypass: a matching case-insensitive unique index directly on
+-- public.profiles.email, so the uniqueness rule is enforced at both
+-- layers a query might ever touch, not just auth.users.
+-- ============================================================
+create unique index if not exists idx_profiles_email_unique
+  on public.profiles (lower(email))
+  where email is not null;
+
+-- ============================================================
+-- SECTION 40: Home page media — three developer-uploaded images that
+-- fill the decorative hero/about/"Hungry Between Lectures" panels on
+-- the customer app's public marketing homepage (js/pages/home.js
+-- mHeroSection()/mAboutSection()/mLecturesSection()). Those panels are
+-- plain CSS gradients until a developer uploads a real photo for that
+-- slot — never a fabricated stock image. Same pattern as top_adverts
+-- (section 28): developer-only writes, public reads, reuses the
+-- existing images/video storage buckets (developer already has
+-- blanket write access there, no new storage policy needed).
+-- ============================================================
+create table if not exists public.home_page_media (
+  id uuid primary key default gen_random_uuid(),
+  slot text not null unique check (slot in ('hero', 'about', 'lectures')),
+  image_url text,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id) on delete set null
+);
+
+alter table public.home_page_media enable row level security;
+
+drop policy if exists "home_page_media select" on public.home_page_media;
+create policy "home_page_media select" on public.home_page_media
+  for select using (true);
+
+drop policy if exists "home_page_media developer insert" on public.home_page_media;
+create policy "home_page_media developer insert" on public.home_page_media
+  for insert with check (public.current_role() = 'developer');
+
+drop policy if exists "home_page_media developer update" on public.home_page_media;
+create policy "home_page_media developer update" on public.home_page_media
+  for update using (public.current_role() = 'developer') with check (public.current_role() = 'developer');
+
+drop policy if exists "home_page_media developer delete" on public.home_page_media;
+create policy "home_page_media developer delete" on public.home_page_media
+  for delete using (public.current_role() = 'developer');
+
+create or replace function public.touch_home_page_media_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_home_page_media_updated_at on public.home_page_media;
+create trigger trg_home_page_media_updated_at
+  before update on public.home_page_media
+  for each row execute function public.touch_home_page_media_updated_at();
+
+alter table public.images drop constraint if exists images_kind_check;
+alter table public.images add constraint images_kind_check
+  check (kind in ('logo','cover','menu_item','promotion','addon','top_advert','home_page_media'));
+
+-- ============================================================
+-- SECTION 41: Home page media — editable captions. The developer
+-- previously had no way to change the fixed "About clickFud"/"Hungry
+-- Between Lectures?" titles and subtitles baked into
+-- js/pages/home.js — these two columns let the About and Lectures
+-- slots carry their own developer-written title/subtitle, read back
+-- by App.HomePageMedia.fetchAll() alongside image_url. The hero slot
+-- deliberately keeps its own fixed headline in js/pages/home.js —
+-- these columns exist for it too (same table, no per-slot schema) but
+-- the Developer app's form only exposes them for 'about'/'lectures'.
+-- Nothing here is retroactively required — both columns are nullable,
+-- and js/pages/home.js falls back to its existing default title/
+-- subtitle for a slot until a developer explicitly sets one.
+-- ============================================================
+alter table public.home_page_media add column if not exists title text;
+alter table public.home_page_media add column if not exists subtitle text;
+
+-- ============================================================
+-- 34. FIX — finalize_paystack_checkout() created real, paid order rows
+-- but never inserted a notifications row for the customer at all. A cash
+-- order gets a "received — the kitchen is preparing it now!" notification
+-- from App.Orders.createOrder() client-side; a card order that just went
+-- through this function got nothing — no confirmation that the payment
+-- (and the order) genuinely succeeded, in-app. Fixed by inserting one
+-- notification per order created in the loop, worded specifically as a
+-- PAYMENT confirmation (not just "order received") since that's the
+-- thing this function's caller (paystack-verify / paystack-webhook) is
+-- actually confirming that createOrder()'s COD path never had to.
+-- ============================================================
+create or replace function public.finalize_paystack_checkout(p_reference text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session public.checkout_sessions;
+  v_group jsonb;
+  v_order public.orders;
+  v_order_ids jsonb := '[]'::jsonb;
+begin
+  select * into v_session from public.checkout_sessions where reference = p_reference for update;
+  if not found then
+    raise exception 'Unknown checkout session.';
+  end if;
+
+  if v_session.status = 'paid' then
+    return jsonb_build_object('order_ids', v_session.order_ids);
+  end if;
+
+  for v_group in select * from jsonb_array_elements(v_session.groups)
+  loop
+    insert into public.orders (
+      customer_id, store_id, items, subtotal, delivery_fee, discount, promo_code, total,
+      payment_method, payment_status, payment_reference, delivery_location, status, status_history,
+      paystack_subaccount_code, payout_amount, platform_fee_amount
+    ) values (
+      v_session.customer_id,
+      (v_group->>'storeId')::uuid,
+      v_group->'items',
+      (v_group->>'subtotal')::numeric,
+      0,
+      coalesce((v_group->>'discount')::numeric, 0),
+      v_group->>'promoCode',
+      (v_group->>'total')::numeric,
+      'card',
+      'paid',
+      p_reference,
+      v_group->'deliveryLocation',
+      'received',
+      jsonb_build_array(jsonb_build_object('status', 'received', 'at', now())),
+      v_group->>'subaccountCode',
+      (v_group->>'shopAmount')::numeric,
+      coalesce((v_group->>'platformFeeAmount')::numeric, 0)
+    )
+    returning * into v_order;
+
+    v_order_ids := v_order_ids || to_jsonb(v_order.id);
+
+    insert into public.notifications (user_id, message, type)
+    values (
+      v_session.customer_id,
+      'Payment successful! Your order ' || v_order.order_number || ' has been successfully placed.',
+      'order_received'
+    );
+  end loop;
+
+  update public.checkout_sessions
+    set status = 'paid', order_ids = v_order_ids, updated_at = now()
+    where reference = p_reference;
+
+  return jsonb_build_object('order_ids', v_order_ids);
+end;
+$$;
+
+-- ============================================================
+-- 35. FIX — finalize_paystack_checkout() created card-paid orders with
+-- status 'received'. The COD path (App.Orders.createOrder(), js/orders.js)
+-- has always created orders at status 'preparing' directly (auto-accept,
+-- section 38) — 'received' only ever appears as a status_history entry,
+-- never as the live status. The kitchen board (Staff app, kitchen.js)
+-- was built on exactly that assumption: it only has "Preparing"/"Ready"
+-- columns, deliberately with no "received" column at all ("every order
+-- is already in the real queue the moment it's placed"). A card order
+-- left at status='received' matched neither column and never appeared
+-- on the kitchen board at all, even though the customer correctly saw
+-- "order placed" — the kitchen simply never got it. Fixed to match the
+-- COD path exactly: live status 'preparing', 'received' kept only in
+-- status_history so the tracker's step-by-step display is unchanged.
+-- ============================================================
+create or replace function public.finalize_paystack_checkout(p_reference text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session public.checkout_sessions;
+  v_group jsonb;
+  v_order public.orders;
+  v_order_ids jsonb := '[]'::jsonb;
+begin
+  select * into v_session from public.checkout_sessions where reference = p_reference for update;
+  if not found then
+    raise exception 'Unknown checkout session.';
+  end if;
+
+  if v_session.status = 'paid' then
+    return jsonb_build_object('order_ids', v_session.order_ids);
+  end if;
+
+  for v_group in select * from jsonb_array_elements(v_session.groups)
+  loop
+    insert into public.orders (
+      customer_id, store_id, items, subtotal, delivery_fee, discount, promo_code, total,
+      payment_method, payment_status, payment_reference, delivery_location, status, status_history,
+      paystack_subaccount_code, payout_amount, platform_fee_amount
+    ) values (
+      v_session.customer_id,
+      (v_group->>'storeId')::uuid,
+      v_group->'items',
+      (v_group->>'subtotal')::numeric,
+      0,
+      coalesce((v_group->>'discount')::numeric, 0),
+      v_group->>'promoCode',
+      (v_group->>'total')::numeric,
+      'card',
+      'paid',
+      p_reference,
+      v_group->'deliveryLocation',
+      'preparing',
+      jsonb_build_array(jsonb_build_object('status', 'received', 'at', now()), jsonb_build_object('status', 'preparing', 'at', now())),
+      v_group->>'subaccountCode',
+      (v_group->>'shopAmount')::numeric,
+      coalesce((v_group->>'platformFeeAmount')::numeric, 0)
+    )
+    returning * into v_order;
+
+    v_order_ids := v_order_ids || to_jsonb(v_order.id);
+
+    insert into public.notifications (user_id, message, type)
+    values (
+      v_session.customer_id,
+      'Payment successful! Your order ' || v_order.order_number || ' has been successfully placed.',
+      'order_received'
+    );
+  end loop;
+
+  update public.checkout_sessions
+    set status = 'paid', order_ids = v_order_ids, updated_at = now()
+    where reference = p_reference;
+
+  return jsonb_build_object('order_ids', v_order_ids);
+end;
+$$;
+
+-- ============================================================
+-- 36. FIX — confirm_collection() only checked that cash_tendered wasn't
+-- negative; staff could confirm a COD collection with ANY cash amount
+-- entered (too much, too little, or blank), with nothing stopping it.
+-- For a cash order, the amount actually handed over must exactly match
+-- the order's real total (a 0.005 tolerance only covers floating-point
+-- rounding, never a genuine short/over payment) or the collection is
+-- refused outright — enforced here server-side, not just as a frontend
+-- hint, so it can't be bypassed by calling the RPC directly.
+-- ============================================================
+create or replace function public.confirm_collection(p_order_id uuid, p_code text, p_cash_tendered numeric default null)
+returns public.orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order public.orders;
+  v_input text;
+begin
+  if public.current_role() not in ('manager', 'kitchen') then
+    raise exception 'Not authorised to confirm collection.';
+  end if;
+
+  select * into v_order from public.orders where id = p_order_id for update;
+  if not found then
+    raise exception 'Order not found.';
+  end if;
+  if v_order.store_id is distinct from public.current_store_id() then
+    raise exception 'This order does not belong to your store.';
+  end if;
+  if v_order.status = 'collected' then
+    raise exception 'Order has already been collected.';
+  end if;
+  if v_order.status <> 'ready' then
+    raise exception 'Order is not ready for collection yet.';
+  end if;
+
+  v_input := upper(trim(coalesce(p_code, '')));
+  if v_input = '' or v_order.collection_code is null
+     or v_input not in (upper(v_order.collection_code), upper(v_order.collection_token::text)) then
+    raise exception 'Invalid collection code.';
+  end if;
+
+  if p_cash_tendered is not null and p_cash_tendered < 0 then
+    raise exception 'Cash received cannot be negative.';
+  end if;
+
+  if v_order.payment_method = 'cod' then
+    if p_cash_tendered is null then
+      raise exception 'Please enter the exact cash received before confirming collection.';
+    end if;
+    if abs(p_cash_tendered - v_order.total) > 0.005 then
+      raise exception 'Cash received (R%) does not match the order total (R%) — enter the exact amount.',
+        trim(to_char(p_cash_tendered, 'FM999999990.00')), trim(to_char(v_order.total, 'FM999999990.00'));
+    end if;
+  end if;
+
+  update public.orders
+    set status = 'collected',
+        status_history = coalesce(v_order.status_history, '[]'::jsonb) || jsonb_build_object('status', 'collected', 'at', now()),
+        payment_status = 'paid',
+        cash_tendered = coalesce(p_cash_tendered, v_order.cash_tendered),
+        collected_at = now(),
+        collected_by = auth.uid()
+    where id = p_order_id
+    returning * into v_order;
+
+  insert into public.notifications (user_id, message, type)
+  values (v_order.customer_id, 'Order ' || v_order.order_number || ' collected. Enjoy your meal!', 'delivered');
+
+  return v_order;
+end;
+$$;
+
+-- ============================================================
+-- 37. NEW — Saved payment methods (wallet). PCI-compliant by
+-- construction: this table only ever stores what Paystack's own
+-- verification response gives back about a REUSABLE card authorization
+-- (paystack_authorization_code — an opaque token, not the card itself
+-- — plus bank/card_type/last4/exp for display). Raw card number, CVV
+-- and PIN never pass through our servers at all; Paystack's hosted
+-- checkout/SDK collects them directly, matching Paystack's own current
+-- documented flow (initialize -> Checkout -> verify). Written ONLY by
+-- edge functions (service role) right after a real, verified Paystack
+-- transaction — never by a raw client insert, so a customer can't
+-- fabricate a "saved card" for themselves.
+-- ============================================================
+create table if not exists public.payment_methods (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null references public.profiles (id) on delete cascade,
+  paystack_authorization_code text not null,
+  card_type text,
+  bank text,
+  last4 text,
+  exp_month text,
+  exp_year text,
+  is_default boolean not null default false,
+  created_at timestamptz not null default now(),
+  unique (customer_id, paystack_authorization_code)
+);
+
+create index if not exists payment_methods_customer_id_idx on public.payment_methods (customer_id);
+
+alter table public.payment_methods enable row level security;
+
+drop policy if exists "payment_methods select own" on public.payment_methods;
+create policy "payment_methods select own"
+  on public.payment_methods for select
+  using (customer_id = auth.uid());
+
+-- Deleting/renaming-default is safe for a customer to do to their own
+-- row directly — no card data involved, just their own reference to it.
+drop policy if exists "payment_methods delete own" on public.payment_methods;
+create policy "payment_methods delete own"
+  on public.payment_methods for delete
+  using (customer_id = auth.uid());
+
+drop policy if exists "payment_methods update own default flag" on public.payment_methods;
+create policy "payment_methods update own default flag"
+  on public.payment_methods for update
+  using (customer_id = auth.uid())
+  with check (customer_id = auth.uid());
+-- No insert policy at all for authenticated/anon — only service role
+-- (paystack-verify, after real verification) ever creates a row here.
+
+-- Keeps "is_default" meaningful (at most one true per customer) without
+-- trusting the client to unset the others itself.
+create or replace function public.set_default_payment_method()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.is_default then
+    update public.payment_methods set is_default = false
+      where customer_id = new.customer_id and id <> new.id and is_default = true;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_set_default_payment_method on public.payment_methods;
+create trigger trg_set_default_payment_method
+  before insert or update on public.payment_methods
+  for each row execute function public.set_default_payment_method();
+
+-- ============================================================
+-- Section 39: Payment event log (audit trail for payment/webhook
+-- processing — never contains card data, since none of the
+-- paystack-* functions ever touch it). Append-only, service-role
+-- writes only, developer-only reads. Applied via the Management API
+-- 2026-09-24.
+-- ============================================================
+create table if not exists public.payment_events (
+  id uuid primary key default gen_random_uuid(),
+  event_type text not null,
+  source text not null,
+  reference text,
+  order_id uuid references public.orders (id) on delete set null,
+  customer_id uuid references public.profiles (id) on delete set null,
+  status text,
+  failure_reason text,
+  created_at timestamptz not null default now()
+);
+create index if not exists payment_events_reference_idx on public.payment_events (reference);
+create index if not exists payment_events_order_id_idx on public.payment_events (order_id);
+create index if not exists payment_events_created_at_idx on public.payment_events (created_at desc);
+
+alter table public.payment_events enable row level security;
+
+drop policy if exists "payment_events select developer" on public.payment_events;
+create policy "payment_events select developer"
+  on public.payment_events for select
+  using (public."current_role"() = 'developer');
+-- No insert/update/delete policy for anon/authenticated at all —
+-- only service role (edge functions) ever writes a row here.
+
+-- ============================================================
+-- Section 40: failure_reason on checkout_sessions, and a refund
+-- lifecycle that follows Paystack's documented behaviour — a
+-- successful POST /refund response only means the refund was
+-- QUEUED, not completed (confirmed against Paystack's current
+-- docs/support articles). orders.payment_status gains two new
+-- values used only during that window: 'refund_pending' (set the
+-- moment Paystack accepts the refund request, by
+-- paystack-cancel-order) and 'refund_failed' (set if Paystack's
+-- async processing fails it) — 'refunded' is now only ever set by
+-- paystack-webhook once Paystack's refund.processed event confirms
+-- completion. No existing UI treated anything other than the
+-- literal string 'paid' as success, so this is a safe additive
+-- change, not a changed meaning of an existing value.
+-- ============================================================
+alter table public.checkout_sessions add column if not exists failure_reason text;
+
+drop function if exists public.mark_paystack_checkout_failed(text);
+create function public.mark_paystack_checkout_failed(p_reference text, p_reason text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.checkout_sessions
+    set status = 'failed', failure_reason = coalesce(p_reason, failure_reason), updated_at = now()
+    where reference = p_reference and status = 'pending';
+end;
+$$;
+
+-- ============================================================
+-- Section 41: Per-menu-item developer platform fee, replacing the
+-- percentage-based commission_percent for pricing purposes (explicit
+-- decision — commission_percent stays in the stores table but is no
+-- longer applied to checkout pricing; paystack-initialize and
+-- paystack-charge-saved both now compute the platform's split share
+-- as the sum of each item's own platform_fee_amount, capped at the
+-- group's post-discount total so a promo discount is always absorbed
+-- by the shop's own share first). The developer sets a flat rand
+-- amount per item at approval time (see menu-review.js's approve());
+-- the customer pays price + platform_fee_amount for that item as one
+-- combined price — the manager's own price is unaffected and is
+-- still exactly what reaches their payout. Applied 2026-09-24.
+-- ============================================================
+alter table public.menu_items add column if not exists platform_fee_amount numeric not null default 0;
+
+-- Same protection as status/approved_at/etc. — a manager updating
+-- their own item can never set or change this themselves, only a
+-- developer (enforced here, not just hidden in the UI).
+create or replace function public.enforce_menu_item_status()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+
+  if TG_OP = 'INSERT' then
+    if public.current_role() is distinct from 'developer' then
+      new.status := 'pending';
+      new.approved_at := null; new.approved_by := null;
+      new.rejected_at := null; new.rejection_reason := null;
+      new.suspended_at := null; new.suspended_by := null;
+      new.platform_fee_amount := 0;
+    end if;
+    new.submitted_at := now();
+  elsif TG_OP = 'UPDATE' then
+    if public.current_role() is distinct from 'developer' then
+      new.status := old.status;
+      new.approved_at := old.approved_at; new.approved_by := old.approved_by;
+      new.rejected_at := old.rejected_at; new.rejection_reason := old.rejection_reason;
+      new.suspended_at := old.suspended_at; new.suspended_by := old.suspended_by;
+      new.submitted_at := old.submitted_at;
+      new.platform_fee_amount := old.platform_fee_amount;
+
+      if old.status = 'rejected' then
+        new.status := 'pending';
+        new.submitted_at := now();
+        new.rejected_at := null; new.rejection_reason := null;
+      elsif old.status = 'approved' and (
+        new.image is distinct from old.image or
+        new.name is distinct from old.name or
+        new.description is distinct from old.description or
+        new.category is distinct from old.category or
+        new.ingredients is distinct from old.ingredients or
+        new.allergens is distinct from old.allergens
+      ) then
+        new.status := 'pending';
+        new.submitted_at := now();
+        new.approved_at := null; new.approved_by := null;
+      end if;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+-- ============================================================
+-- NEW (2026-09-28) — Order idempotency key (duplicate-order protection)
+--
+-- A cash (COD) order is a direct INSERT from the customer's browser.
+-- If the connection drops AFTER Postgres commits the row but BEFORE the
+-- response reaches the phone, the app sees a network error, leaves the
+-- items in the cart, and a retry used to create a second, real order.
+--
+-- The customer app now sends a client_request_id (a UUID generated once
+-- per checkout attempt per shop, and reused on every retry of that same
+-- attempt). This unique index makes the database itself reject the
+-- duplicate; the app catches that rejection (23505) and simply loads the
+-- order that already exists instead of creating another one.
+--
+-- Partial index (only where set) so every historical order and every
+-- server-created order (finalize_paystack_checkout, which has its own
+-- reference-based idempotency) is unaffected.
+--
+-- Safe to run more than once. The customer app keeps working before
+-- this is run (it falls back to inserting without the column), it just
+-- isn't protected against duplicates until it is.
+-- ============================================================
+alter table public.orders add column if not exists client_request_id uuid;
+
+create unique index if not exists orders_customer_client_request_uidx
+  on public.orders (customer_id, client_request_id)
+  where client_request_id is not null;
+
+-- ============================================================
+-- NEW (2026-09-28) — Students can attend more than one campus
+--
+-- profiles.campuses holds every campus a student ticked (at least one is
+-- required by the customer app before they can use it — see
+-- js/pages/campus-setup.js). profiles.campus_location is kept as the
+-- FIRST of those campuses, so every existing screen/query that only
+-- knows about one campus (My Orientation, the Staff/Developer apps)
+-- keeps working unchanged.
+--
+-- No new RLS policy needed: students already update their own profile
+-- row through the existing "profiles update own" policy, and
+-- trg_prevent_role_change only guards role/store_id.
+--
+-- Safe to run more than once. The customer app keeps working before this
+-- is run (it saves just the first campus into campus_location).
+-- ============================================================
+alter table public.profiles add column if not exists campuses text[] not null default '{}';
+
+-- Carry every existing student's single campus over into the new list.
+update public.profiles
+   set campuses = array[campus_location]
+ where campus_location is not null
+   and cardinality(campuses) = 0;
+
+-- ============================================================
+-- NEW (2026-09-29) — Share a timetable with friends by link.
+--
+-- A student taps "Share" on My Timetable: create_timetable_share()
+-- stores a SNAPSHOT of their classes (not a live view) and returns an
+-- unguessable id, sent as clickfud…/?timetable=<id> (WhatsApp etc.).
+-- The friend opens it, previews it (get_timetable_share), and on accept
+-- (accept_timetable_share) the classes are COPIED into the friend's own
+-- timetable_entries — so reminders, directions and editing all work
+-- exactly like classes they typed in themselves.
+--
+-- Privacy:
+--   - timetable_entries RLS is unchanged: nobody can read anyone else's
+--     timetable. Only what the owner chose to share, frozen at that
+--     moment, is visible — and only to someone holding the link.
+--   - personal `notes` are never included in a share.
+--   - links expire after 30 days; the owner can revoke (revoked=true).
+--   - no one can list shares: the table has no select policy for anyone
+--     but the owner; previews/accepts go through the functions below.
+-- ============================================================
+create table if not exists public.timetable_shares (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  owner_name text,
+  entries jsonb not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '30 days',
+  revoked boolean not null default false,
+  accept_count int not null default 0
+);
+create index if not exists idx_timetable_shares_owner on public.timetable_shares(owner_id, created_at desc);
+alter table public.timetable_shares enable row level security;
+
+drop policy if exists "timetable shares owner select" on public.timetable_shares;
+create policy "timetable shares owner select" on public.timetable_shares
+  for select using (owner_id = (select auth.uid()));
+drop policy if exists "timetable shares owner revoke" on public.timetable_shares;
+create policy "timetable shares owner revoke" on public.timetable_shares
+  for update using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
+-- No insert/delete policies: shares are only ever created by the function below.
+
+-- ---- create: snapshot the caller's own classes ----
+create or replace function public.create_timetable_share()
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_entries jsonb;
+  v_name text;
+  v_id uuid;
+begin
+  if v_uid is null then raise exception 'Please sign in to share your timetable.'; end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'module', module, 'module_code', module_code, 'class_type', class_type,
+      'day_of_week', day_of_week, 'specific_date', specific_date,
+      'start_time', to_char(start_time, 'HH24:MI'), 'end_time', to_char(end_time, 'HH24:MI'),
+      'campus', campus, 'venue', venue, 'lecturer', lecturer
+    ) order by day_of_week, start_time), '[]'::jsonb)
+    into v_entries
+    from public.timetable_entries where student_id = v_uid;
+  if jsonb_array_length(v_entries) = 0 then
+    raise exception 'Your timetable is empty — add your classes before sharing.';
+  end if;
+  if (select count(*) from public.timetable_shares where owner_id = v_uid and created_at > now() - interval '1 day') >= 30 then
+    raise exception 'You have shared your timetable many times today — please try again tomorrow.';
+  end if;
+  select nullif(split_part(coalesce(name, ''), ' ', 1), '') into v_name from public.profiles where id = v_uid;
+  insert into public.timetable_shares (owner_id, owner_name, entries)
+    values (v_uid, v_name, v_entries) returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- ---- preview: anyone holding the link (signed in or not) ----
+create or replace function public.get_timetable_share(p_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'owner_name', coalesce(s.owner_name, 'A friend'),
+    'entries', s.entries,
+    'class_count', jsonb_array_length(s.entries),
+    'expires_at', s.expires_at,
+    'is_own', s.owner_id = auth.uid()
+  )
+  from public.timetable_shares s
+  where s.id = p_id and not s.revoked and s.expires_at > now();
+$$;
+
+-- ---- accept: copy into the CALLER's own timetable ----
+-- p_mode: 'add' (keep existing classes, skip exact duplicates) or
+--         'replace' (remove the caller's existing classes first).
+create or replace function public.accept_timetable_share(p_id uuid, p_mode text default 'add')
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_share public.timetable_shares;
+  v_inserted int;
+begin
+  if v_uid is null then raise exception 'Please sign in to add this timetable.'; end if;
+  if p_mode not in ('add', 'replace') then raise exception 'Invalid option.'; end if;
+  select * into v_share from public.timetable_shares where id = p_id and not revoked and expires_at > now();
+  if not found then raise exception 'This timetable link has expired or is no longer available.'; end if;
+  if v_share.owner_id = v_uid then raise exception 'This is your own timetable.'; end if;
+
+  if p_mode = 'replace' then
+    delete from public.timetable_entries where student_id = v_uid;
+  end if;
+
+  with src as (
+    select e->>'module' module, nullif(e->>'module_code', '') module_code, e->>'class_type' class_type,
+           (e->>'day_of_week')::smallint day_of_week, nullif(e->>'specific_date', '')::date specific_date,
+           (e->>'start_time')::time start_time, (e->>'end_time')::time end_time,
+           e->>'campus' campus, e->>'venue' venue, nullif(e->>'lecturer', '') lecturer
+    from jsonb_array_elements(v_share.entries) e
+  ), ins as (
+    insert into public.timetable_entries (student_id, module, module_code, class_type, day_of_week, specific_date, start_time, end_time, campus, venue, lecturer)
+    select v_uid, s.module, s.module_code, s.class_type, s.day_of_week, s.specific_date, s.start_time, s.end_time, s.campus, s.venue, s.lecturer
+    from src s
+    where not exists (
+      select 1 from public.timetable_entries t
+      where t.student_id = v_uid and t.module = s.module and t.class_type = s.class_type
+        and t.day_of_week = s.day_of_week and t.specific_date is not distinct from s.specific_date
+        and t.start_time = s.start_time and t.end_time = s.end_time and t.venue = s.venue
+    )
+    returning 1
+  )
+  select count(*) into v_inserted from ins;
+
+  update public.timetable_shares set accept_count = accept_count + 1 where id = p_id;
+  return v_inserted;
+end;
+$$;
+
+revoke all on function public.create_timetable_share() from public;
+revoke all on function public.get_timetable_share(uuid) from public;
+revoke all on function public.accept_timetable_share(uuid, text) from public;
+grant execute on function public.create_timetable_share() to authenticated;
+grant execute on function public.get_timetable_share(uuid) to anon, authenticated;
+grant execute on function public.accept_timetable_share(uuid, text) to authenticated;
+
+-- ============================================================
+-- NEW (2026-09-29) — CUSTOMER accounts restricted to verified University
+-- of Pretoria student emails; student number collected at sign-up.
+--
+-- WHY HERE: customer sign-up goes from the browser straight to Supabase
+-- Auth, so the database is the only server-side point every sign-up
+-- (email form, direct API call, Google OAuth) must pass through.
+-- handle_new_user() already decides each new account's role; the rule is
+-- applied right after that decision, ONLY when the result is 'customer'.
+-- Raising an exception there rolls back the whole sign-up: no auth user,
+-- no profile, no confirmation email.
+--
+-- WHAT IS AND ISN'T CHECKED:
+--   - email must end in an approved UP student domain (up_student_email_
+--     domains() — the ONE authoritative list; js/config.js mirrors it for
+--     on-screen messages only).
+--   - ownership of that email is proven by Supabase's existing
+--     confirmation link — unconfirmed accounts cannot sign in.
+--   - student number: required and format-checked (u + 8 digits). It is
+--     SELF-REPORTED — nothing here claims UP has confirmed the student is
+--     currently registered. No UP systems are contacted.
+--
+-- OTHER ROLES — UNCHANGED:
+--   - manager / driver / first-developer sign-ups resolve to their own
+--     role and are not affected.
+--   - accounts created by an ADMIN are exempt: kitchen staff
+--     (create-kitchen-staff, admin API) and dispatchers created by hand in
+--     the Supabase dashboard. They are the only accounts that exist
+--     already-confirmed at the moment of creation (email provider +
+--     email_confirmed_at set) — a normal sign-up cannot do that while the
+--     project's "Confirm email" setting is ON. KEEP IT ON: turning it off
+--     would make ordinary sign-ups look admin-created and skip this rule.
+--
+-- EXISTING ACCOUNTS: nothing is deleted or altered. Existing non-UP
+-- customers are refused at customer-app sign-in (secure-login + app),
+-- per the product decision to apply the rule to everyone.
+-- Safe to run more than once.
+-- ============================================================
+
+-- 1. The single authoritative list of approved student email domains.
+create or replace function public.up_student_email_domains()
+returns text[]
+language sql
+immutable
+as $$ select array['tuks.co.za']::text[] $$;
+
+create or replace function public.is_up_student_email(p_email text)
+returns boolean
+language sql
+immutable
+as $$
+  select p_email is not null
+     and lower(btrim(p_email)) ~ '^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$'
+     and split_part(lower(btrim(p_email)), '@', 2) = any (public.up_student_email_domains())
+$$;
+grant execute on function public.up_student_email_domains() to anon, authenticated;
+grant execute on function public.is_up_student_email(text) to anon, authenticated;
+
+-- 2. Student number on the profile (new, nullable: existing rows untouched).
+alter table public.profiles add column if not exists student_number text;
+do $$ begin
+  alter table public.profiles add constraint profiles_student_number_format
+    check (student_number is null or student_number ~ '^u[0-9]{8}$');
+exception when duplicate_object then null; end $$;
+
+-- 3. handle_new_user(): IDENTICAL role logic to the live version, plus the
+--    customer-only rule and storing the student number.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_requested_role text;
+  v_role text;
+  v_status text;
+  v_student_number text;
+begin
+  v_requested_role := coalesce(new.raw_user_meta_data->>'role', 'customer');
+  v_status := 'approved';
+
+  if v_requested_role = 'developer' then
+    if exists (select 1 from public.profiles where role = 'developer') then
+      v_role := 'customer';
+    else
+      v_role := 'developer';
+    end if;
+  elsif v_requested_role = 'manager' then
+    v_role := 'manager';
+  elsif v_requested_role = 'driver' then
+    v_role := 'driver';
+    v_status := 'pending';
+  else
+    v_role := 'customer';
+  end if;
+
+  -- Normalise "U12345678" / "12345678" / " u1234 5678 " -> "u12345678".
+  -- Only "u" + digits/spaces is accepted; anything else counts as missing.
+  v_student_number := lower(coalesce(new.raw_user_meta_data->>'student_number', ''));
+  if v_student_number ~ '^\s*u?[0-9\s]+$' then
+    v_student_number := 'u' || regexp_replace(v_student_number, '[^0-9]', '', 'g');
+  else
+    v_student_number := null;
+  end if;
+
+  if v_student_number is not null and v_student_number !~ '^u[0-9]{8}$' then
+    v_student_number := null; -- never let a malformed value block a non-customer sign-up
+  end if;
+
+  insert into public.profiles (id, name, email, role, phone, store_id, university, campus_location, status, avatar_url, student_number)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'name', new.raw_user_meta_data->>'full_name', split_part(new.email,'@',1)),
+    new.email,
+    v_role,
+    new.raw_user_meta_data->>'phone',
+    null,
+    new.raw_user_meta_data->>'university',
+    new.raw_user_meta_data->>'campus_location',
+    v_status,
+    coalesce(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture'),
+    case when v_role = 'customer' then v_student_number else null end
+  )
+  on conflict (id) do nothing;
+
+  return new;
+end;
+$$;
+
+-- 3b. THE ENFORCEMENT — a deferred check, run at the END of the sign-up
+--     transaction (not at the first INSERT).
+--
+--     Why deferred: Supabase inserts every new auth user unconfirmed and
+--     only then, still inside the same transaction, either marks it
+--     confirmed (admin-created: create-kitchen-staff, dashboard "Add user"
+--     with auto-confirm) or records the confirmation email (normal
+--     sign-up). At INSERT time the two look identical; at COMMIT they
+--     don't. Raising here aborts the whole transaction — no auth user, no
+--     profile, and the confirmation email is never sent.
+--
+--     Applies only when the account's role ended up 'customer':
+--       - provider 'email' + still unconfirmed at commit = a real sign-up
+--         -> needs a UP student email AND a valid student number;
+--       - any other provider (Google…) -> needs a UP student email (the
+--         student number is asked once in the app: no form on that path);
+--       - provider 'email' + already confirmed at commit = created by an
+--         admin -> exempt (kitchen staff, dispatchers). A normal sign-up
+--         can't be confirmed at commit while "Confirm email" is ON.
+create or replace function public.enforce_customer_signup()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user record;
+  v_role text;
+  v_student_number text;
+  v_provider text;
+begin
+  -- A deferred trigger's NEW is the row as first inserted; read the final state.
+  select id, email, email_confirmed_at, raw_app_meta_data into v_user from auth.users where id = new.id;
+  if not found then return null; end if;
+  select role, student_number into v_role, v_student_number from public.profiles where id = new.id;
+  if coalesce(v_role, 'customer') <> 'customer' then return null; end if;
+
+  v_provider := coalesce(v_user.raw_app_meta_data->>'provider', 'email');
+  if v_provider = 'email' and v_user.email_confirmed_at is not null then
+    return null; -- created by an admin (see above)
+  end if;
+
+  if not public.is_up_student_email(v_user.email) then
+    raise exception 'UP_STUDENT_EMAIL_REQUIRED: customer accounts need a University of Pretoria student email'
+      using errcode = 'check_violation';
+  end if;
+  if v_provider = 'email' and (v_student_number is null or v_student_number !~ '^u[0-9]{8}$') then
+    raise exception 'UP_STUDENT_NUMBER_REQUIRED: a valid student number is required'
+      using errcode = 'check_violation';
+  end if;
+  return null;
+end;
+$$;
+drop trigger if exists trg_enforce_customer_signup on auth.users;
+create constraint trigger trg_enforce_customer_signup
+  after insert on auth.users
+  deferrable initially deferred
+  for each row execute function public.enforce_customer_signup();
+
+-- 4. A customer can't move their account to a non-UP email afterwards.
+create or replace function public.enforce_customer_email_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (select 1 from public.profiles p where p.id = new.id and p.role = 'customer') then
+    if new.email is distinct from old.email and not public.is_up_student_email(new.email) then
+      raise exception 'UP_STUDENT_EMAIL_REQUIRED: customer accounts need a University of Pretoria student email'
+        using errcode = 'check_violation';
+    end if;
+    if new.email_change is distinct from old.email_change and coalesce(new.email_change, '') <> ''
+       and not public.is_up_student_email(new.email_change) then
+      raise exception 'UP_STUDENT_EMAIL_REQUIRED: customer accounts need a University of Pretoria student email'
+        using errcode = 'check_violation';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_enforce_customer_email_change on auth.users;
+create trigger trg_enforce_customer_email_change
+  before update of email, email_change on auth.users
+  for each row execute function public.enforce_customer_email_change();
+
+
+-- ============================================================
+-- NEW (2026-09-29) — PROMO CODES ARE FOR ONE SPECIFIC PRODUCT
+--
+-- A promo code now belongs to one menu item (and so to that item's
+-- shop). The discount is worked out ONLY on that product's lines in the
+-- cart — never the rest of the shop's items or other shops' items.
+--   percentage: X% of (that product's price incl. extras x qty)
+--   fixed:      R X off, at most that product's line total (once per order)
+-- Enforced here (validate_order_pricing caps every order's discount) and
+-- mirrored in paystack-initialize / paystack-charge-saved and the
+-- customer app (js/promotions.js).
+--
+-- Managers only see/edit their OWN shop's codes, and can only attach a
+-- code to their own shop's products. Existing codes with no product
+-- (legacy, whole-order) keep working as before but can't be switched on
+-- again without choosing a product.
+-- Safe to run more than once.
+-- ============================================================
+
+alter table public.promotions add column if not exists menu_item_id uuid references public.menu_items(id) on delete cascade;
+alter table public.promotions add column if not exists store_id uuid references public.stores(id) on delete cascade;
+create index if not exists promotions_store_id_idx on public.promotions(store_id);
+
+-- store_id is always derived from the product, never trusted from the client.
+create or replace function public.enforce_promo_product()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_store uuid;
+begin
+  if new.menu_item_id is null then
+    new.store_id := null;
+    if auth.uid() is not null and (tg_op = 'INSERT' or new.active) then
+      raise exception 'Choose the product this promo code is for.' using errcode = 'check_violation';
+    end if;
+    return new;
+  end if;
+  select store_id into v_store from public.menu_items where id = new.menu_item_id;
+  if v_store is null then
+    raise exception 'That product no longer exists.' using errcode = 'check_violation';
+  end if;
+  if auth.uid() is not null and public.current_role() = 'manager' and v_store is distinct from public.current_store_id() then
+    raise exception 'You can only create promo codes for your own shop''s products.' using errcode = 'check_violation';
+  end if;
+  new.store_id := v_store;
+  return new;
+end;
+$$;
+drop trigger if exists trg_enforce_promo_product on public.promotions;
+create trigger trg_enforce_promo_product
+  before insert or update on public.promotions
+  for each row execute function public.enforce_promo_product();
+
+-- Managers: only their own shop's codes (plus old product-less codes, so
+-- they can still be fixed or deleted).
+drop policy if exists "promos manager write" on public.promotions;
+create policy "promos manager write" on public.promotions
+  for all
+  using (public.current_role() = 'manager' and (store_id = public.current_store_id() or store_id is null))
+  with check (public.current_role() = 'manager' and (store_id = public.current_store_id() or (store_id is null and not active)));
+
+create or replace function public.validate_order_pricing()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_item jsonb;
+  v_items jsonb := '[]'::jsonb;
+  v_menu_item public.menu_items;
+  v_addon public.menu_addons;
+  v_addons_total numeric(10,2);
+  v_addons_out jsonb;
+  v_addon_obj jsonb;
+  v_extra_id uuid;
+  v_item_extra public.item_extras;
+  v_unit_price numeric(10,2);
+  v_qty int;
+  v_subtotal numeric(10,2) := 0;
+  v_promo public.promotions;
+  v_max_discount numeric(10,2);
+  v_eligible numeric(10,2);
+begin
+  if new.store_id is null then
+    raise exception 'Order must belong to a store.';
+  end if;
+  if jsonb_array_length(coalesce(new.items, '[]'::jsonb)) = 0 then
+    raise exception 'Order must contain at least one item.';
+  end if;
+
+  for v_item in select * from jsonb_array_elements(new.items)
+  loop
+    v_qty := greatest(1, coalesce((v_item->>'qty')::int, 1));
+
+    if coalesce((v_item->>'isAddon')::boolean, false) then
+      select * into v_addon from public.menu_addons
+        where id = (v_item->>'menuItemId')::uuid and store_id = new.store_id;
+      if not found or not v_addon.is_available then
+        raise exception 'One or more add-ons in this order are no longer available.';
+      end if;
+      v_unit_price := v_addon.price;
+      v_addons_out := '[]'::jsonb;
+    else
+      select * into v_menu_item from public.menu_items
+        where id = (v_item->>'menuItemId')::uuid and store_id = new.store_id;
+      if not found or not v_menu_item.available then
+        raise exception 'One or more items in this order are no longer available.';
+      end if;
+      if v_menu_item.stock < v_qty then
+        raise exception 'Only % left of "%".', v_menu_item.stock, v_menu_item.name;
+      end if;
+
+      -- Per-product extras (public.item_extras / public.item_extra_links,
+      -- manager-configured - never a fixed/hardcoded list). Every extra id
+      -- the client sent is re-looked-up here: it must be linked to THIS
+      -- exact menu item, belong to this store, and currently be
+      -- available, or the whole order is rejected. The name/price stored
+      -- on the order always come from this live lookup, never from
+      -- whatever the client sent - a tampered name or price can't slip
+      -- through even if a tampered id happens to resolve to something.
+      v_addons_total := 0;
+      v_addons_out := '[]'::jsonb;
+      if jsonb_typeof(v_item->'addons') = 'array' then
+        for v_addon_obj in select * from jsonb_array_elements(v_item->'addons')
+        loop
+          begin
+            v_extra_id := (v_addon_obj->>'id')::uuid;
+          exception when others then
+            raise exception 'Invalid extra selection.';
+          end;
+          select ie.* into v_item_extra from public.item_extras ie
+            join public.item_extra_links iel on iel.item_extra_id = ie.id
+            where ie.id = v_extra_id
+              and iel.menu_item_id = v_menu_item.id
+              and ie.store_id = new.store_id
+              and ie.available = true;
+          if not found then
+            raise exception 'One or more selected extras are no longer available for "%".', v_menu_item.name;
+          end if;
+          v_addons_total := v_addons_total + v_item_extra.price;
+          v_addons_out := v_addons_out || jsonb_build_object('id', v_item_extra.id, 'name', v_item_extra.name, 'price', v_item_extra.price);
+        end loop;
+      end if;
+
+      v_unit_price := v_menu_item.price + v_addons_total;
+    end if;
+
+    v_items := v_items || jsonb_build_object(
+      'menuItemId', v_item->>'menuItemId',
+      'name', v_item->>'name',
+      'price', round(v_unit_price, 2),
+      'qty', v_qty,
+      'image', v_item->'image',
+      'addons', v_addons_out,
+      'specialInstructions', coalesce(v_item->>'specialInstructions', ''),
+      'isAddon', coalesce((v_item->>'isAddon')::boolean, false)
+    );
+    v_subtotal := v_subtotal + round(v_unit_price, 2) * v_qty;
+  end loop;
+
+  new.items := v_items;
+  new.subtotal := round(v_subtotal, 2);
+  new.delivery_fee := round(coalesce(new.delivery_fee, 0), 2);
+
+  if new.promo_code is not null then
+    select * into v_promo from public.promotions where code = new.promo_code;
+    if not found or not v_promo.active
+       or (v_promo.expires_at is not null and v_promo.expires_at < now())
+       or (v_promo.usage_limit is not null and v_promo.used_count >= v_promo.usage_limit) then
+      v_max_discount := 0;
+      new.promo_code := null;
+    else
+      -- Product-specific code: only that product's lines count (its price
+      -- + extras + platform fee, as the customer was charged). A legacy
+      -- code with no product still counts the whole order.
+      if v_promo.menu_item_id is null then
+        v_eligible := new.subtotal;
+      else
+        select coalesce(sum(((e->>'price')::numeric + coalesce(mi.platform_fee_amount, 0)) * (e->>'qty')::int), 0)
+          into v_eligible
+          from jsonb_array_elements(v_items) e
+          join public.menu_items mi on mi.id = v_promo.menu_item_id
+          where e->>'menuItemId' = v_promo.menu_item_id::text
+            and not coalesce((e->>'isAddon')::boolean, false);
+      end if;
+      if v_eligible <= 0 then
+        v_max_discount := 0;
+        new.promo_code := null;
+      elsif v_promo.type = 'percentage' then
+        v_max_discount := round(v_eligible * (v_promo.value / 100), 2);
+      else
+        v_max_discount := least(v_promo.value, v_eligible);
+      end if;
+    end if;
+    new.discount := least(greatest(coalesce(new.discount, 0), 0), v_max_discount);
+  else
+    new.discount := 0;
+  end if;
+
+  new.total := greatest(0, new.subtotal + new.delivery_fee - new.discount);
+
+  return new;
+end;
+$function$;
+
+
+-- ============================================================
+-- NEW (2026-09-29) — A PROMO CODE CAN COVER SEVERAL PRODUCTS
+--
+-- Replaces the single promotions.menu_item_id (promo_products.sql, same
+-- day) with a list: promotions.menu_item_ids. The manager ticks the
+-- products the code is for; the discount is worked out ONLY on those
+-- products' lines in the cart.
+--   percentage: X% of (those products' price incl. extras x qty)
+--   fixed:      R X off once per order, at most those products' total
+-- All chosen products must belong to ONE shop (the manager's own); the
+-- code's store_id is derived from them. Mirrored in paystack-initialize /
+-- paystack-charge-saved and js/promotions.js.
+-- Safe to run more than once.
+-- ============================================================
+
+alter table public.promotions add column if not exists menu_item_ids uuid[];
+alter table public.promotions add column if not exists store_id uuid references public.stores(id) on delete cascade;
+create index if not exists promotions_store_id_idx on public.promotions(store_id);
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'promotions' and column_name = 'menu_item_id') then
+    update public.promotions set menu_item_ids = array[menu_item_id] where menu_item_id is not null and menu_item_ids is null;
+    alter table public.promotions drop column menu_item_id;
+  end if;
+end $$;
+
+create or replace function public.enforce_promo_product()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_found int;
+  v_stores int;
+  v_store uuid;
+begin
+  -- de-duplicate, drop nulls
+  new.menu_item_ids := nullif(array(select distinct x from unnest(coalesce(new.menu_item_ids, '{}'::uuid[])) x where x is not null), '{}'::uuid[]);
+  if new.menu_item_ids is null then
+    new.store_id := null;
+    if auth.uid() is not null and (tg_op = 'INSERT' or new.active) then
+      raise exception 'Choose at least one product this promo code is for.' using errcode = 'check_violation';
+    end if;
+    return new;
+  end if;
+  select count(*), count(distinct store_id), min(store_id::text)::uuid
+    into v_found, v_stores, v_store
+    from public.menu_items where id = any (new.menu_item_ids);
+  if v_found <> cardinality(new.menu_item_ids) then
+    raise exception 'One or more of the chosen products no longer exist.' using errcode = 'check_violation';
+  end if;
+  if v_stores <> 1 then
+    raise exception 'All products on one promo code must be from the same shop.' using errcode = 'check_violation';
+  end if;
+  if auth.uid() is not null and public.current_role() = 'manager' and v_store is distinct from public.current_store_id() then
+    raise exception 'You can only create promo codes for your own shop''s products.' using errcode = 'check_violation';
+  end if;
+  new.store_id := v_store;
+  return new;
+end;
+$$;
+drop trigger if exists trg_enforce_promo_product on public.promotions;
+create trigger trg_enforce_promo_product
+  before insert or update on public.promotions
+  for each row execute function public.enforce_promo_product();
+
+create or replace function public.validate_order_pricing()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_item jsonb;
+  v_items jsonb := '[]'::jsonb;
+  v_menu_item public.menu_items;
+  v_addon public.menu_addons;
+  v_addons_total numeric(10,2);
+  v_addons_out jsonb;
+  v_addon_obj jsonb;
+  v_extra_id uuid;
+  v_item_extra public.item_extras;
+  v_unit_price numeric(10,2);
+  v_qty int;
+  v_subtotal numeric(10,2) := 0;
+  v_promo public.promotions;
+  v_max_discount numeric(10,2);
+  v_eligible numeric(10,2);
+begin
+  if new.store_id is null then
+    raise exception 'Order must belong to a store.';
+  end if;
+  if jsonb_array_length(coalesce(new.items, '[]'::jsonb)) = 0 then
+    raise exception 'Order must contain at least one item.';
+  end if;
+
+  for v_item in select * from jsonb_array_elements(new.items)
+  loop
+    v_qty := greatest(1, coalesce((v_item->>'qty')::int, 1));
+
+    if coalesce((v_item->>'isAddon')::boolean, false) then
+      select * into v_addon from public.menu_addons
+        where id = (v_item->>'menuItemId')::uuid and store_id = new.store_id;
+      if not found or not v_addon.is_available then
+        raise exception 'One or more add-ons in this order are no longer available.';
+      end if;
+      v_unit_price := v_addon.price;
+      v_addons_out := '[]'::jsonb;
+    else
+      select * into v_menu_item from public.menu_items
+        where id = (v_item->>'menuItemId')::uuid and store_id = new.store_id;
+      if not found or not v_menu_item.available then
+        raise exception 'One or more items in this order are no longer available.';
+      end if;
+      if v_menu_item.stock < v_qty then
+        raise exception 'Only % left of "%".', v_menu_item.stock, v_menu_item.name;
+      end if;
+
+      -- Per-product extras (public.item_extras / public.item_extra_links,
+      -- manager-configured - never a fixed/hardcoded list). Every extra id
+      -- the client sent is re-looked-up here: it must be linked to THIS
+      -- exact menu item, belong to this store, and currently be
+      -- available, or the whole order is rejected. The name/price stored
+      -- on the order always come from this live lookup, never from
+      -- whatever the client sent - a tampered name or price can't slip
+      -- through even if a tampered id happens to resolve to something.
+      v_addons_total := 0;
+      v_addons_out := '[]'::jsonb;
+      if jsonb_typeof(v_item->'addons') = 'array' then
+        for v_addon_obj in select * from jsonb_array_elements(v_item->'addons')
+        loop
+          begin
+            v_extra_id := (v_addon_obj->>'id')::uuid;
+          exception when others then
+            raise exception 'Invalid extra selection.';
+          end;
+          select ie.* into v_item_extra from public.item_extras ie
+            join public.item_extra_links iel on iel.item_extra_id = ie.id
+            where ie.id = v_extra_id
+              and iel.menu_item_id = v_menu_item.id
+              and ie.store_id = new.store_id
+              and ie.available = true;
+          if not found then
+            raise exception 'One or more selected extras are no longer available for "%".', v_menu_item.name;
+          end if;
+          v_addons_total := v_addons_total + v_item_extra.price;
+          v_addons_out := v_addons_out || jsonb_build_object('id', v_item_extra.id, 'name', v_item_extra.name, 'price', v_item_extra.price);
+        end loop;
+      end if;
+
+      v_unit_price := v_menu_item.price + v_addons_total;
+    end if;
+
+    v_items := v_items || jsonb_build_object(
+      'menuItemId', v_item->>'menuItemId',
+      'name', v_item->>'name',
+      'price', round(v_unit_price, 2),
+      'qty', v_qty,
+      'image', v_item->'image',
+      'addons', v_addons_out,
+      'specialInstructions', coalesce(v_item->>'specialInstructions', ''),
+      'isAddon', coalesce((v_item->>'isAddon')::boolean, false)
+    );
+    v_subtotal := v_subtotal + round(v_unit_price, 2) * v_qty;
+  end loop;
+
+  new.items := v_items;
+  new.subtotal := round(v_subtotal, 2);
+  new.delivery_fee := round(coalesce(new.delivery_fee, 0), 2);
+
+  if new.promo_code is not null then
+    select * into v_promo from public.promotions where code = new.promo_code;
+    if not found or not v_promo.active
+       or (v_promo.expires_at is not null and v_promo.expires_at < now())
+       or (v_promo.usage_limit is not null and v_promo.used_count >= v_promo.usage_limit) then
+      v_max_discount := 0;
+      new.promo_code := null;
+    else
+      -- Product code: only the chosen products' lines count (price
+      -- + extras + platform fee, as the customer was charged). A legacy
+      -- code with no product still counts the whole order.
+      if coalesce(cardinality(v_promo.menu_item_ids), 0) = 0 then
+        v_eligible := new.subtotal;
+      else
+        select coalesce(sum(((e->>'price')::numeric + coalesce(mi.platform_fee_amount, 0)) * (e->>'qty')::int), 0)
+          into v_eligible
+          from jsonb_array_elements(v_items) e
+          join public.menu_items mi on mi.id::text = e->>'menuItemId'
+          where mi.id = any (v_promo.menu_item_ids)
+            and not coalesce((e->>'isAddon')::boolean, false);
+      end if;
+      if v_eligible <= 0 then
+        v_max_discount := 0;
+        new.promo_code := null;
+      elsif v_promo.type = 'percentage' then
+        v_max_discount := round(v_eligible * (v_promo.value / 100), 2);
+      else
+        v_max_discount := least(v_promo.value, v_eligible);
+      end if;
+    end if;
+    new.discount := least(greatest(coalesce(new.discount, 0), 0), v_max_discount);
+  else
+    new.discount := 0;
+  end if;
+
+  new.total := greatest(0, new.subtotal + new.delivery_fee - new.discount);
+
+  return new;
+end;
+$function$;
+
+
+-- ============================================================
+-- NEW (2026-09-29) — MISSED COLLECTION / RESCHEDULE COLLECTION
+--
+-- One order, one order number, start to finish. Nothing here creates an
+-- order, a payment, or a charge: every step updates the SAME orders row.
+--
+-- Flow for a collection order (delivery orders are unaffected):
+--   ready ─(window: ready_at + collection_window_minutes)─┐
+--     collected by staff at any point → status 'collected' (ends everything)
+--     window passes, no collection → collection_state 'expired',
+--       customer asked "Are you still going to collect?" (one notification)
+--       ├ "Yes" + new time → same order, collection_state 'rescheduled'
+--       │    food still there → stays 'ready', new deadline = new time + window
+--       │    food released    → back to 'preparing' (needs_reprep) — kitchen
+--       │                        makes it again, marks it ready as usual
+--       ├ "No"               → 'cancelled' (collection_state 'declined'),
+--       │                        existing rules: a ready order is never
+--       │                        refunded by cancelling; payment untouched
+--       └ no answer within collection_response_minutes → 'uncollected'
+--     rescheduled deadline passes: another expiry if reschedules remain
+--     (max_collection_reschedules), otherwise status 'uncollected'.
+--   'uncollected' = closed: off the kitchen board and the customer's active
+--   orders, cannot be rescheduled; the row (payment, history) is kept.
+--
+-- Staff: 'released' (gave it away after the window) and 'reprepare' (make
+-- it again — e.g. the customer walked in after it was released) via
+-- staff_collection_action(). confirm_collection() is unchanged and still
+-- works for any 'ready' order — it simply ends the whole workflow.
+--
+-- The clock runs on the SERVER: pg_cron calls expire_collection_windows()
+-- every minute, so it works with the customer's app closed or offline.
+-- Safe to run more than once.
+-- ============================================================
+
+-- 1. Settings (one row, id = 1)
+alter table public.platform_config add column if not exists collection_window_minutes int not null default 30;
+alter table public.platform_config add column if not exists max_collection_reschedules int not null default 2;
+alter table public.platform_config add column if not exists collection_response_minutes int not null default 60;
+
+-- 2. New final status
+alter table public.orders drop constraint if exists orders_status_check;
+alter table public.orders add constraint orders_status_check
+  check (status = any (array['received','preparing','ready','out_for_delivery','delivered','collected','cancelled','uncollected']));
+
+-- 3. Collection tracking on the order itself
+alter table public.orders add column if not exists ready_at timestamptz;
+alter table public.orders add column if not exists original_ready_at timestamptz;
+alter table public.orders add column if not exists collection_deadline timestamptz;
+alter table public.orders add column if not exists original_collection_deadline timestamptz;
+alter table public.orders add column if not exists collection_state text;
+alter table public.orders add column if not exists collection_expired_at timestamptz;
+alter table public.orders add column if not exists collection_response_deadline timestamptz;
+alter table public.orders add column if not exists rescheduled_for timestamptz;
+alter table public.orders add column if not exists rescheduled_at timestamptz;
+alter table public.orders add column if not exists reschedule_reason text;
+alter table public.orders add column if not exists reschedule_count int not null default 0;
+alter table public.orders add column if not exists released_at timestamptz;
+alter table public.orders add column if not exists needs_reprep boolean not null default false;
+alter table public.orders drop constraint if exists orders_collection_state_check;
+alter table public.orders add constraint orders_collection_state_check
+  check (collection_state is null or collection_state = any (array['window','expired','rescheduled','reprep','declined','uncollected','collected']));
+create index if not exists orders_collection_due_idx on public.orders (collection_deadline) where status = 'ready';
+
+create or replace function public.collection_setting(p_name text)
+returns int
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case p_name
+    when 'window'   then coalesce((select collection_window_minutes   from public.platform_config where id = 1), 30)
+    when 'max'      then coalesce((select max_collection_reschedules  from public.platform_config where id = 1), 2)
+    when 'response' then coalesce((select collection_response_minutes from public.platform_config where id = 1), 60)
+  end
+$$;
+
+-- "13:00" in South African time, for notification text.
+create or replace function public.sa_time(p_at timestamptz)
+returns text
+language sql
+immutable
+as $$ select to_char(p_at at time zone 'Africa/Johannesburg', 'HH24:MI') $$;
+
+-- 4. Real ready timestamp + deadline, set by the server whenever a
+--    collection order becomes ready (first time, or again after re-making).
+create or replace function public.track_collection_window()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_deadline timestamptz;
+begin
+  if coalesce(new.delivery_location->>'fulfilment', '') <> 'collection' then
+    return new;
+  end if;
+  if new.status = 'ready' and old.status is distinct from 'ready' then
+    v_deadline := greatest(now(), coalesce(new.rescheduled_for, now()))
+                  + make_interval(mins => public.collection_setting('window'));
+    new.ready_at := now();
+    new.original_ready_at := coalesce(old.original_ready_at, now());
+    new.collection_deadline := v_deadline;
+    new.original_collection_deadline := coalesce(old.original_collection_deadline, v_deadline);
+    new.collection_state := case when coalesce(new.reschedule_count, 0) > 0 then 'rescheduled' else 'window' end;
+    new.collection_response_deadline := null;
+    new.needs_reprep := false;
+    new.released_at := null; -- freshly made: this food is here
+  end if;
+  if new.status = 'collected' and old.status is distinct from 'collected' then
+    new.collection_state := 'collected';
+    new.collection_response_deadline := null;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_track_collection_window on public.orders;
+create trigger trg_track_collection_window
+  before update on public.orders
+  for each row execute function public.track_collection_window();
+
+-- 5. The clock (runs every minute from pg_cron).
+create or replace function public.expire_collection_windows()
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  o public.orders;
+  v_max int := public.collection_setting('max');
+  v_resp int := public.collection_setting('response');
+  n int := 0;
+begin
+  -- a) collection time passed, not collected
+  for o in
+    select * from public.orders
+     where status = 'ready' and collection_state in ('window', 'rescheduled')
+       and collection_deadline < now()
+     for update skip locked
+  loop
+    if o.reschedule_count >= v_max then
+      update public.orders set
+        status = 'uncollected', collection_state = 'uncollected', collection_expired_at = now(),
+        collection_response_deadline = null,
+        status_history = coalesce(status_history, '[]'::jsonb) || jsonb_build_object('status', 'uncollected', 'at', now())
+       where id = o.id;
+      insert into public.notifications (user_id, message, type) values (o.customer_id,
+        'Your collection time for order ' || o.order_number || ' has passed and the order was not collected, so it has been closed.', 'order_uncollected');
+    else
+      update public.orders set
+        collection_state = 'expired', collection_expired_at = now(),
+        collection_response_deadline = now() + make_interval(mins => v_resp),
+        status_history = coalesce(status_history, '[]'::jsonb) || jsonb_build_object('status', 'collection_expired', 'at', now())
+       where id = o.id;
+      insert into public.notifications (user_id, message, type) values (o.customer_id,
+        case when o.reschedule_count > 0
+          then 'Your new collection time (' || public.sa_time(o.rescheduled_for) || ') for order ' || o.order_number || ' has passed, and your order has not been collected. Are you still going to collect your order?'
+          else 'Your ' || public.collection_setting('window') || '-minute collection period for order ' || o.order_number || ' has passed, and your order has not been collected. Are you still going to collect your order?'
+        end, 'collection_expired');
+    end if;
+    n := n + 1;
+  end loop;
+
+  -- b) asked, but no answer in time
+  for o in
+    select * from public.orders
+     where status = 'ready' and collection_state = 'expired'
+       and collection_response_deadline < now()
+     for update skip locked
+  loop
+    update public.orders set
+      status = 'uncollected', collection_state = 'uncollected', collection_response_deadline = null,
+      status_history = coalesce(status_history, '[]'::jsonb) || jsonb_build_object('status', 'uncollected', 'at', now())
+     where id = o.id;
+    insert into public.notifications (user_id, message, type) values (o.customer_id,
+      'Order ' || o.order_number || ' was not collected and we did not hear back from you, so it has been closed.', 'order_uncollected');
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+revoke all on function public.expire_collection_windows() from public, anon, authenticated;
+
+-- 6. Customer: "Yes, I'll still collect" (+ new time, optional reason) or "No".
+create or replace function public.respond_missed_collection(p_order_id uuid, p_will_collect boolean, p_new_time timestamptz default null, p_reason text default null)
+returns public.orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  o public.orders;
+  v_reason text := nullif(btrim(left(coalesce(p_reason, ''), 300)), '');
+  v_window int := public.collection_setting('window');
+  v_reprep boolean;
+begin
+  select * into o from public.orders where id = p_order_id for update;
+  if not found or o.customer_id is distinct from auth.uid() then
+    raise exception 'Order not found.';
+  end if;
+  if o.status = 'collected' then
+    raise exception 'This order has already been collected.';
+  end if;
+  if o.status in ('uncollected', 'cancelled') then
+    raise exception 'This order has expired and can no longer be rescheduled.';
+  end if;
+  if o.status <> 'ready' or o.collection_state is distinct from 'expired' then
+    raise exception 'This order is not waiting for a new collection time.';
+  end if;
+
+  if not p_will_collect then
+    update public.orders set
+      status = 'cancelled', collection_state = 'declined', collection_response_deadline = null,
+      status_history = coalesce(status_history, '[]'::jsonb) || jsonb_build_object('status', 'cancelled', 'at', now(), 'reason', 'customer_will_not_collect')
+     where id = o.id returning * into o;
+    insert into public.notifications (user_id, message, type) values (o.customer_id,
+      'Order ' || o.order_number || ' has been cancelled because you won''t be collecting it.', 'order_cancelled');
+    return o;
+  end if;
+
+  if o.reschedule_count >= public.collection_setting('max') then
+    raise exception 'This order cannot be rescheduled again.';
+  end if;
+  if p_new_time is null or p_new_time < now() - interval '2 minutes' or p_new_time > now() + interval '6 hours' then
+    raise exception 'Please choose a collection time within the next 6 hours.';
+  end if;
+
+  v_reprep := o.released_at is not null;
+  update public.orders set
+    rescheduled_for = p_new_time,
+    rescheduled_at = now(),
+    reschedule_reason = v_reason,
+    reschedule_count = o.reschedule_count + 1,
+    collection_response_deadline = null,
+    collection_state = 'rescheduled',
+    status = case when v_reprep then 'preparing' else 'ready' end,
+    needs_reprep = v_reprep,
+    collection_deadline = case when v_reprep then null else greatest(p_new_time, now()) + make_interval(mins => v_window) end,
+    status_history = coalesce(status_history, '[]'::jsonb)
+      || jsonb_build_object('status', 'rescheduled', 'at', now(), 'for', p_new_time)
+      || case when v_reprep then jsonb_build_array(jsonb_build_object('status', 'preparing', 'at', now(), 'reason', 'prepare_again')) else '[]'::jsonb end
+   where id = o.id returning * into o;
+  insert into public.notifications (user_id, message, type) values (o.customer_id,
+    'Your collection has been rescheduled for ' || public.sa_time(p_new_time) || '. Your order number remains ' || o.order_number || '.'
+    || case when v_reprep then ' Your order will be prepared again for your new collection time.' else '' end,
+    'order_rescheduled');
+  return o;
+end;
+$$;
+revoke all on function public.respond_missed_collection(uuid, boolean, timestamptz, text) from public, anon;
+grant execute on function public.respond_missed_collection(uuid, boolean, timestamptz, text) to authenticated;
+
+-- 7. Staff: 'released' (gave the food away after the window passed) and
+--    'reprepare' (make it again — customer is back / rescheduled).
+create or replace function public.staff_collection_action(p_order_id uuid, p_action text)
+returns public.orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  o public.orders;
+begin
+  if public.current_role() not in ('manager', 'kitchen') then
+    raise exception 'Not authorised.';
+  end if;
+  select * into o from public.orders where id = p_order_id for update;
+  if not found or o.store_id is distinct from public.current_store_id() then
+    raise exception 'Order not found.';
+  end if;
+  if o.status <> 'ready' or coalesce(o.delivery_location->>'fulfilment', '') <> 'collection' then
+    raise exception 'Only a ready collection order can be changed here.';
+  end if;
+
+  if p_action = 'released' then
+    if o.released_at is not null then return o; end if;
+    if o.collection_deadline is null or o.collection_deadline > now() then
+      raise exception 'The collection window has not passed yet.';
+    end if;
+    update public.orders set
+      released_at = now(),
+      status_history = coalesce(status_history, '[]'::jsonb) || jsonb_build_object('status', 'released', 'at', now())
+     where id = o.id returning * into o;
+    return o;
+  elsif p_action = 'reprepare' then
+    update public.orders set
+      status = 'preparing', needs_reprep = true, released_at = coalesce(released_at, now()),
+      collection_state = case when collection_state = 'rescheduled' then 'rescheduled' else 'reprep' end,
+      collection_response_deadline = null, collection_deadline = null,
+      status_history = coalesce(status_history, '[]'::jsonb) || jsonb_build_object('status', 'preparing', 'at', now(), 'reason', 'prepare_again')
+     where id = o.id returning * into o;
+    insert into public.notifications (user_id, message, type) values (o.customer_id,
+      'Your order ' || o.order_number || ' will be prepared again. We''ll let you know when it''s ready.', 'preparing');
+    return o;
+  end if;
+  raise exception 'Unknown action.';
+end;
+$$;
+revoke all on function public.staff_collection_action(uuid, text) from public, anon;
+grant execute on function public.staff_collection_action(uuid, text) to authenticated;
+
+-- 8. Existing ready collection orders: fill in their real ready time.
+--    Ones already past their window are marked expired WITHOUT sending
+--    notifications now (the app shows them the question when opened).
+update public.orders o set
+  ready_at = h.at, original_ready_at = h.at,
+  collection_deadline = h.at + make_interval(mins => public.collection_setting('window')),
+  original_collection_deadline = h.at + make_interval(mins => public.collection_setting('window')),
+  collection_state = case when h.at + make_interval(mins => public.collection_setting('window')) < now() then 'expired' else 'window' end,
+  collection_expired_at = case when h.at + make_interval(mins => public.collection_setting('window')) < now() then now() end,
+  collection_response_deadline = case when h.at + make_interval(mins => public.collection_setting('window')) < now()
+    then now() + make_interval(mins => public.collection_setting('response')) end
+from (
+  select id, (select (e->>'at')::timestamptz from jsonb_array_elements(status_history) e
+               where e->>'status' = 'ready' order by (e->>'at')::timestamptz desc limit 1) as at
+    from public.orders
+   where status = 'ready' and coalesce(delivery_location->>'fulfilment', '') = 'collection' and collection_state is null
+) h
+where o.id = h.id and h.at is not null;
+
+-- 9. Schedule the clock (every minute).
+do $$ begin
+  if exists (select 1 from cron.job where jobname = 'expire-collection-windows') then
+    perform cron.unschedule('expire-collection-windows');
+  end if;
+  perform cron.schedule('expire-collection-windows', '* * * * *', 'select public.expire_collection_windows()');
+end $$;

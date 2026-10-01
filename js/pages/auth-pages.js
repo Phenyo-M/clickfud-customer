@@ -6,10 +6,10 @@ App.Pages = App.Pages || {};
 
 App.Pages.Auth = (function () {
   const U = App.Utils;
-  const local = { tab: 'login', showForgot: false, error: null, loading: false, passwordIssues: null, passwordTouched: false, confirmError: null, confirmTouched: false };
+  const local = { tab: 'login', showForgot: false, error: null, loading: false, passwordIssues: null, passwordTouched: false, confirmError: null, confirmTouched: false, pendingVerificationEmail: null, prefillEmail: null, googleLoading: false };
 
-  function setTab(tab) { clearLockoutInterval(); local.tab = tab; local.showForgot = false; local.error = null; local.passwordTouched = false; local.passwordIssues = null; local.confirmTouched = false; local.confirmError = null; App.render(); }
-  function toggleForgot() { clearLockoutInterval(); local.showForgot = !local.showForgot; local.error = null; App.render(); }
+  function setTab(tab) { clearLockoutInterval(); clearForgotCooldown(); local.tab = tab; local.showForgot = false; local.error = null; local.passwordTouched = false; local.passwordIssues = null; local.confirmTouched = false; local.confirmError = null; App.render(); }
+  function toggleForgot() { clearLockoutInterval(); clearForgotCooldown(); local.showForgot = !local.showForgot; local.error = null; App.render(); }
 
   // Counts down a submit-blocking wait, updating the error banner text in
   // place (not via App.render(), which would wipe whatever the user typed
@@ -27,6 +27,82 @@ App.Pages.Auth = (function () {
   function clearLockoutInterval() {
     if (lockoutInterval) { clearInterval(lockoutInterval); lockoutInterval = null; }
   }
+  // Disables just the "Send Reset Link" button with a visible countdown —
+  // a real per-click cooldown independent of (and in addition to)
+  // Supabase's own account-wide auth rate limit, so a customer can't spam
+  // this form. Direct DOM update, not App.render(), so it doesn't disturb
+  // the email field's value or focus.
+  let forgotCooldownInterval = null;
+  function clearForgotCooldown() {
+    if (forgotCooldownInterval) { clearInterval(forgotCooldownInterval); forgotCooldownInterval = null; }
+  }
+  // Same pattern, for the "Resend verification email" button — a separate
+  // timer/target so the two cooldowns (forgot-password vs. resend-signup-
+  // verification) never interfere with each other.
+  let resendCooldownInterval = null;
+  function clearResendCooldown() {
+    if (resendCooldownInterval) { clearInterval(resendCooldownInterval); resendCooldownInterval = null; }
+  }
+  function startResendVerificationCooldown(seconds) {
+    clearResendCooldown();
+    const until = Date.now() + seconds * 1000;
+    const btn = document.querySelector('[data-action="resend-verification"]');
+    if (!btn) return;
+    const originalLabel = 'Resend verification email';
+    function tick() {
+      const remaining = Math.ceil((until - Date.now()) / 1000);
+      if (remaining <= 0) {
+        clearInterval(resendCooldownInterval);
+        resendCooldownInterval = null;
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = `Resend available in ${remaining}s`;
+    }
+    tick();
+    resendCooldownInterval = setInterval(tick, 1000);
+  }
+
+  // Races a request against a hard ceiling so a slow/hung Supabase or
+  // Brevo call can never leave a submit button spinning forever — the UI
+  // only ever waits for the API to ACCEPT the request, never for the
+  // actual email to land in an inbox (that happens well after this
+  // resolves either way).
+  function withTimeout(promise, ms) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const err = new Error('Request timed out');
+        err.isTimeout = true;
+        reject(err);
+      }, ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+  function startForgotPasswordCooldown(seconds) {
+    clearForgotCooldown();
+    const until = Date.now() + seconds * 1000;
+    const btn = document.querySelector('form[data-form="forgot-form"] button[type="submit"]');
+    if (!btn) return;
+    const originalLabel = 'Send Reset Link';
+    function tick() {
+      const remaining = Math.ceil((until - Date.now()) / 1000);
+      if (remaining <= 0) {
+        clearInterval(forgotCooldownInterval);
+        forgotCooldownInterval = null;
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = `Resend available in ${remaining}s`;
+    }
+    tick();
+    forgotCooldownInterval = setInterval(tick, 1000);
+  }
+
   function startLockoutCountdown(formSelector, untilTs, baseMessage) {
     clearLockoutInterval();
     function tick() {
@@ -72,8 +148,19 @@ App.Pages.Auth = (function () {
     if (!input) return;
     const nowShowing = input.type === 'password';
     input.type = nowShowing ? 'text' : 'password';
+    // Restore focus/cursor to the input itself — the click that got here
+    // moved focus to the button, and the spec requires typing to be able
+    // to continue uninterrupted right after toggling.
+    input.focus();
+    try { const len = input.value.length; input.setSelectionRange(len, len); } catch (e) {}
     if (!btnEl) return;
-    const icon = btnEl.querySelector('i');
+    // '[data-lucide]' (not 'i') because App.render() already ran
+    // lucide.createIcons() once before this can ever be clicked, which
+    // replaces the original <i data-lucide="eye"> placeholder with an
+    // inline <svg data-lucide="eye">  — querying for an 'i' tag here
+    // always found nothing, so the icon never visually changed even
+    // though the input's type was toggling correctly underneath it.
+    const icon = btnEl.querySelector('[data-lucide]');
     if (icon) icon.setAttribute('data-lucide', nowShowing ? 'eye-off' : 'eye');
     btnEl.setAttribute('aria-label', nowShowing ? 'Hide password' : 'Show password');
     if (window.lucide) lucide.createIcons({ context: btnEl.parentElement });
@@ -87,8 +174,10 @@ App.Pages.Auth = (function () {
           <i data-lucide="arrow-left"></i> Back to browsing
         </button>
         <div class="flex items-center mb-4" style="justify-content:center;">
-          ${App.Shared.CampusEatsLogo({ size: 'md', bg: 'white', wordmark: true })}
+          ${App.Shared.ClickFudLogo({ size: 'md', bg: 'white', wordmark: true })}
         </div>
+        ${renderGoogleButton()}
+        <div class="auth-divider"><span>or</span></div>
         <div class="auth-tabs">
           <button class="auth-tab ${local.tab === 'login' ? 'active' : ''}" data-action="auth-tab" data-tab="login">Log In</button>
           <button class="auth-tab ${local.tab === 'signup' ? 'active' : ''}" data-action="auth-tab" data-tab="signup">Sign Up</button>
@@ -108,7 +197,7 @@ App.Pages.Auth = (function () {
     <div class="auth-wrap">
       <div class="card auth-card">
         <div class="flex items-center mb-4" style="justify-content:center;">
-          ${App.Shared.CampusEatsLogo({ size: 'md', bg: 'white', wordmark: true })}
+          ${App.Shared.ClickFudLogo({ size: 'md', bg: 'white', wordmark: true })}
         </div>
         <h2 class="section-title mb-1" style="text-align:center;">Create New Password</h2>
         <p class="text-sm text-muted mb-3" style="text-align:center;">Choose a new password for your account.</p>
@@ -131,6 +220,48 @@ App.Pages.Auth = (function () {
     </div>`;
   }
 
+  // Google's own multi-colour "G" mark, inline (official path data — never
+  // recoloured/altered, per Google's Sign In branding guidelines), so the
+  // button renders correctly with zero extra image assets to ship. Works
+  // identically on Android and iOS: this is a plain redirect button in a
+  // web page, not a native control, so there is no platform-specific
+  // variant to build.
+  function googleIcon() {
+    return `<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.9c1.7-1.57 2.7-3.88 2.7-6.62z"/>
+      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.9-2.26c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.96v2.33A9 9 0 0 0 9 18z"/>
+      <path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 0 1 3.67 9c0-.59.1-1.16.28-1.7V4.97H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.03l2.99-2.33z"/>
+      <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.97l2.99 2.33C4.66 5.17 6.65 3.58 9 3.58z"/>
+    </svg>`;
+  }
+
+  function renderGoogleButton() {
+    return `
+    <button type="button" class="btn btn-google btn-block ${local.googleLoading ? 'btn-loading' : ''}" data-action="continue-with-google" ${local.googleLoading ? 'disabled' : ''}>
+      ${local.googleLoading ? '' : googleIcon()} Continue with Google
+    </button>`;
+  }
+
+  async function continueWithGoogle(btnEl) {
+    if (local.googleLoading) return; // guards a repeat tap while the redirect is starting
+    local.googleLoading = true;
+    if (btnEl) { btnEl.classList.add('btn-loading'); btnEl.disabled = true; }
+    try {
+      const res = await App.Auth.signInWithGoogle();
+      if (res.error) {
+        local.googleLoading = false;
+        if (btnEl) { btnEl.classList.remove('btn-loading'); btnEl.disabled = false; }
+        App.Toast.error(res.error);
+      }
+      // On success the browser is already navigating to Google — nothing
+      // left to restore the button for.
+    } catch (e) {
+      local.googleLoading = false;
+      if (btnEl) { btnEl.classList.remove('btn-loading'); btnEl.disabled = false; }
+      App.Toast.error("Couldn't reach Google right now. Please check your connection and try again.");
+    }
+  }
+
   function renderLogin() {
     if (local.showForgot) {
       return `
@@ -142,8 +273,15 @@ App.Pages.Auth = (function () {
       </form>`;
     }
     return `
+    ${local.pendingVerificationEmail ? `
+      <div class="closed-banner" style="margin-bottom:14px;">
+        <i data-lucide="mail"></i>
+        <span>We sent a verification link to <strong>${U.escapeHtml(local.pendingVerificationEmail)}</strong>. Didn't get it?</span>
+      </div>
+      <button type="button" class="btn btn-ghost btn-block mb-3 text-sm" data-action="resend-verification">Resend verification email</button>
+    ` : ''}
     <form data-form="login-form">
-      <div class="field"><label for="li-email">Email</label><input class="input" type="email" id="li-email" name="email" required autocomplete="email" /></div>
+      <div class="field"><label for="li-email">UP Student Email</label><input class="input" type="email" id="li-email" name="email" value="${local.prefillEmail ? U.escapeHtml(local.prefillEmail) : ''}" placeholder="u12345678@${U.escapeHtml(App.CONFIG.UP_STUDENT_EMAIL_DOMAIN)}" required autocomplete="email" /></div>
       ${passwordField({ id: 'li-password', name: 'password', label: 'Password', autocomplete: 'current-password' })}
       <button type="submit" class="btn btn-primary btn-block btn-lg ${local.loading ? 'btn-loading' : ''}">Log In</button>
       <button type="button" class="btn btn-ghost btn-block mt-2 text-sm" data-action="toggle-forgot">Forgot password?</button>
@@ -154,7 +292,15 @@ App.Pages.Auth = (function () {
     return `
     <form data-form="signup-form">
       <div class="field"><label for="su-name">Full Name</label><input class="input" type="text" id="su-name" name="name" required /></div>
-      <div class="field"><label for="su-email">Email</label><input class="input" type="email" id="su-email" name="email" required autocomplete="email" /></div>
+      <div class="field">
+        <label for="su-email">UP Student Email</label>
+        <input class="input" type="email" id="su-email" name="email" placeholder="u12345678@${U.escapeHtml(App.CONFIG.UP_STUDENT_EMAIL_DOMAIN)}" required autocomplete="email" />
+        <div class="text-xs text-muted mt-1">Use your University of Pretoria student email address. We'll send a link to it to confirm it's yours.</div>
+      </div>
+      <div class="field">
+        <label for="su-student-number">Student Number</label>
+        <input class="input" type="text" id="su-student-number" name="student_number" placeholder="Enter your student number" required autocomplete="off" maxlength="12" />
+      </div>
       <div class="field"><label for="su-phone">Phone</label><input class="input" type="tel" id="su-phone" name="phone" placeholder="071 234 5678" /></div>
       ${passwordField({
         id: 'su-password', name: 'password', label: 'Password', autocomplete: 'new-password',
@@ -176,11 +322,13 @@ App.Pages.Auth = (function () {
         </select>
       </div>
       <div class="field" id="campus-field">
-        <label for="su-campus">Which campus are you at?</label>
-        <select class="select" id="su-campus" name="campus_location" required>
-          <option value="">Select a campus</option>
-          ${(App.CONST.UNIVERSITY_CAMPUSES[App.CONST.UNIVERSITIES[0]] || []).map(c => `<option value="${U.escapeHtml(c)}">${U.escapeHtml(c)}</option>`).join('')}
-        </select>
+        <label>Which campus(es) do you attend?</label>
+        <div class="text-xs text-muted mb-2">Tick every campus you attend.</div>
+        ${App.Shared.campusCheckboxes({ group: 'signup', university: App.CONST.UNIVERSITIES[0], initial: [] })}
+      </div>
+      <div class="field">
+        <label for="su-residence">Residence <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+        <input class="input" id="su-residence" name="residence" placeholder="e.g. Tuks Village" maxlength="80" />
       </div>
       <button type="submit" class="btn btn-primary btn-block btn-lg ${local.loading ? 'btn-loading' : ''}">Create Account</button>
     </form>`;
@@ -199,6 +347,13 @@ App.Pages.Auth = (function () {
     isSubmitting = true;
     try {
       await handleSubmitInner(formId, data, formEl);
+    } catch (err) {
+      // Last-resort safety net — whatever branch threw, the button must
+      // never end this function still stuck showing its spinner.
+      console.error('handleSubmit', err);
+      const submitBtn = formEl && formEl.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.classList.remove('btn-loading');
+      App.Toast.error('Something went wrong. Please try again.');
     } finally {
       isSubmitting = false;
     }
@@ -236,30 +391,105 @@ App.Pages.Auth = (function () {
         renderConfirmError();
         return;
       }
+      // Instant feedback only — the database makes the real decision.
+      if (!App.Utils.isUpStudentEmail(data.get('email'))) {
+        App.Toast.error('Please use your University of Pretoria student email address (e.g. u12345678@' + App.CONFIG.UP_STUDENT_EMAIL_DOMAIN + ').');
+        if (submitBtn) submitBtn.classList.remove('btn-loading');
+        return;
+      }
+      if (!App.Utils.normalizeStudentNumber(data.get('student_number'))) {
+        App.Toast.error('Please enter your UP student number (8 digits, e.g. u12345678).');
+        if (submitBtn) submitBtn.classList.remove('btn-loading');
+        return;
+      }
       if (!data.get('university')) {
         App.Toast.error('Please tell us which university you are a student at.');
         if (submitBtn) submitBtn.classList.remove('btn-loading');
         return;
       }
-      if (!data.get('campus_location')) {
-        App.Toast.error('Please tell us which campus you are at.');
+      const campuses = App.Shared.selectedCampuses('signup');
+      if (!campuses.length) {
+        App.Toast.error('Please tick at least one campus you attend.');
         if (submitBtn) submitBtn.classList.remove('btn-loading');
         return;
       }
       const res = await App.Auth.signUp({
         email: data.get('email'), password,
         name: data.get('name'), phone: data.get('phone'), role: 'customer',
-        university: data.get('university'), campusLocation: data.get('campus_location'),
+        university: data.get('university'), campuses, residence: data.get('residence'), studentNumber: data.get('student_number'),
       });
-      if (res.error) { local.error = res.error; App.render(); App.Toast.error(res.error); return; }
-      if (res.pendingConfirmation) { App.Toast.info('Account created! Please check your email to confirm before logging in.'); setTab('login'); return; }
+      if (res.error) {
+        if (res.emailSendFailed) {
+          // The account genuinely exists in Supabase already — send them
+          // to the resend flow instead of leaving them on a form that
+          // would just hit "already registered" if they tried again.
+          local.pendingVerificationEmail = res.email;
+          App.Toast.error(res.error);
+          setTab('login');
+          return;
+        }
+        if (res.alreadyExists) {
+          // One email = one account, enforced by Supabase's own auth.users
+          // uniqueness — send them to Log In with the email pre-filled
+          // rather than leaving them stuck re-submitting a form that can
+          // never succeed for this address.
+          local.prefillEmail = data.get('email');
+          App.Toast.error(res.error);
+          setTab('login');
+          return;
+        }
+        local.error = res.error; App.render(); App.Toast.error(res.error); return;
+      }
+      if (res.pendingConfirmation) {
+        local.pendingVerificationEmail = res.email;
+        App.Toast.info('Account created! Please check your email to confirm before logging in.');
+        setTab('login');
+        return;
+      }
       App.Toast.success('Account created! Welcome to clickFud.');
       App.routeToOwnDashboard();
     } else if (formId === 'forgot-form') {
-      const res = await App.Auth.forgotPassword(data.get('email'));
-      if (res.error) { local.error = res.error; App.render(); App.Toast.error(res.error); return; }
-      App.Toast.success('If that email exists, a reset link has been sent.');
-      toggleForgot();
+      const email = data.get('email');
+      let res;
+      try {
+        res = await withTimeout(App.Auth.forgotPassword(email), 12000);
+      } catch (err) {
+        // Hung request (timeout) or a thrown network error — either way
+        // the spinner must stop here, not wait indefinitely.
+        if (submitBtn) submitBtn.classList.remove('btn-loading');
+        local.error = err && err.isTimeout
+          ? 'The request took too long. Please try again.'
+          : "We couldn't send the email right now. Please try again.";
+        App.render();
+        App.Toast.error(local.error);
+        return;
+      }
+      // This is the actual bug fix: every other branch in this function
+      // reaches an App.render() (or a full navigation) on every path,
+      // which is what clears the btn-loading class added above — this
+      // was the one branch that didn't on success, so the button never
+      // stopped spinning even though the request had already succeeded.
+      if (submitBtn) submitBtn.classList.remove('btn-loading');
+      if (res.error) {
+        // Preserve the two specific, actionable messages (bad email
+        // format caught before any network call, and Supabase's own
+        // account-wide rate limit) — everything else collapses to one
+        // generic message rather than surfacing a raw backend error.
+        const keepSpecific = res.rateLimited || /valid email/i.test(res.error);
+        local.error = keepSpecific ? res.error : "We couldn't send the email right now. Please try again.";
+        App.render();
+        App.Toast.error(local.error);
+        return;
+      }
+      App.Toast.success('Reset link sent. Please check your email.');
+      if (formEl) formEl.reset();
+      // A real client-side cooldown, independent of Supabase's own
+      // account-wide rate limit — without this, nothing stopped a
+      // customer (or a script) submitting this form as fast as it
+      // resolves, e.g. before Brevo's own sending limits kick in.
+      // Genuine, legitimate retries (spelled the email wrong, etc.) are
+      // still possible, just not instantly.
+      startForgotPasswordCooldown(60);
     } else if (formId === 'reset-password-form') {
       const password = data.get('password');
       const confirmPassword = data.get('password_confirm');
@@ -278,10 +508,49 @@ App.Pages.Auth = (function () {
         App.render();
         return;
       }
-      const res = await App.Auth.updatePassword(password);
-      if (res.error) { local.error = res.error; App.render(); App.Toast.error(res.error); return; }
+      let res;
+      try {
+        res = await withTimeout(App.Auth.updatePassword(password), 12000);
+      } catch (err) {
+        if (submitBtn) submitBtn.classList.remove('btn-loading');
+        local.error = err && err.isTimeout
+          ? 'The request took too long. Please try again.'
+          : 'Something went wrong. Please try again.';
+        App.render();
+        App.Toast.error(local.error);
+        return;
+      }
+      if (res.error) { if (submitBtn) submitBtn.classList.remove('btn-loading'); local.error = res.error; App.render(); App.Toast.error(res.error); return; }
       App.Toast.success('Password updated successfully.');
       App.routeToOwnDashboard();
+    }
+  }
+
+  // Direct DOM button state (not App.render()) — same reasoning as the
+  // forgot-password cooldown above: this is a standalone button, not a
+  // form submit, so there's no submitBtn/btn-loading lifecycle to hook
+  // into, and a full re-render isn't needed here anyway.
+  let isResending = false;
+  async function resendVerificationEmail(btnEl) {
+    if (isResending || !local.pendingVerificationEmail) return;
+    isResending = true;
+    const originalLabel = (btnEl && btnEl.textContent) || 'Resend verification email';
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Sending…'; }
+    try {
+      const res = await withTimeout(App.Auth.resendVerification(local.pendingVerificationEmail), 12000);
+      if (res.error) {
+        const keepSpecific = res.rateLimited || /valid email/i.test(res.error);
+        App.Toast.error(keepSpecific ? res.error : "We couldn't resend the email right now. Please try again.");
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = originalLabel; }
+        return;
+      }
+      App.Toast.success('Verification email resent. Please check your inbox.');
+      startResendVerificationCooldown(60); // takes over the button's disabled/text state itself
+    } catch (err) {
+      App.Toast.error(err && err.isTimeout ? 'The request took too long. Please try again.' : "We couldn't resend the email right now. Please try again.");
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = originalLabel; }
+    } finally {
+      isResending = false;
     }
   }
 
@@ -289,6 +558,8 @@ App.Pages.Auth = (function () {
     if (action === 'auth-tab') return setTab(ds.tab);
     if (action === 'toggle-forgot') return toggleForgot();
     if (action === 'toggle-password') return togglePassword(ds.target, el);
+    if (action === 'resend-verification') return resendVerificationEmail(el);
+    if (action === 'continue-with-google') return continueWithGoogle(el);
   }
 
   function handleInput(kind, value) {

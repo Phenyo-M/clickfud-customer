@@ -55,6 +55,7 @@ Deno.serve(async (req) => {
 
     return json({ data: { ok: true } });
   } catch (e) {
+    console.error(e);
     return json({ error: "Something went wrong resetting this password." }, 500);
   }
 });

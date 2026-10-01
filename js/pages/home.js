@@ -25,6 +25,9 @@ App.Pages.Home = (function () {
     foodCategory: 'All', // menu-item category filter for "Food Categories" / "Recommended for You"
     storeSearch: {},   // per-store search term, keyed by storeId
     heroIndex: 0,      // which active store promotion the hero banner is showing
+    showAllShops: false, // "Discover Food Shops" (public marketing home) — false = top 6, true = every real live shop
+    guestOrder: null,     // { fulfilment, university, campus } — set once a guest completes "Start Order" below; null = not chosen yet, shops shown unscoped
+    guestOrderDraft: null, // in-progress selections while the Start Order modal is open
   };
 
   const FOOD_CATEGORY_ICONS = {
@@ -33,6 +36,7 @@ App.Pages.Home = (function () {
   };
 
   function esc(s) { return U.escapeHtml(String(s == null ? '' : s)); }
+
   function money(n) { return 'R' + (Number(n) || 0).toFixed(2); }
 
   // A shop with zero ratings must never look like it scored 0 (reads as a
@@ -78,6 +82,12 @@ App.Pages.Home = (function () {
     if (profile && profile.role === 'customer' && profile.university) {
       return stores.filter(s => s.university === profile.university);
     }
+    // A guest who completed the "Start Order" flow below (home page
+    // only, no account needed) has told us their campus directly —
+    // scope the same way a signed-in customer's own profile would.
+    if (!profile && local.guestOrder && local.guestOrder.campus) {
+      return stores.filter(s => s.university === local.guestOrder.university && s.campus_location === local.guestOrder.campus);
+    }
     return stores;
   }
 
@@ -107,11 +117,25 @@ App.Pages.Home = (function () {
   // Same-campus shops rank ahead of other campuses' — never hides them,
   // just orders them after, so a Hatfield student sees Hatfield shops
   // first but can still scroll to see Mamelodi's, Groenkloof's, etc.
-  function campusRank(store) {
+  // A student can attend several campuses (profile.campuses) — a shop at
+  // ANY of them ranks first.
+  function myCampuses() {
     const profile = S.state.profile;
-    const myCampus = profile && profile.role === 'customer' ? profile.campus_location : null;
-    if (!myCampus) return 0;
-    return store.campus_location === myCampus ? 0 : 1;
+    return profile && profile.role === 'customer' ? App.Auth.campusesOf(profile) : [];
+  }
+  function campusRank(store) {
+    const mine = myCampuses();
+    if (!mine.length) return 0;
+    return mine.includes(store.campus_location) ? 0 : 1;
+  }
+  function myCampusStores() {
+    const mine = myCampuses();
+    if (!mine.length) return [];
+    return sortStores(allStores().filter(s => mine.includes(s.campus_location)));
+  }
+  function campusesLabel(list) {
+    if (list.length <= 1) return list[0] || '';
+    return list.slice(0, -1).join(', ') + ' & ' + list[list.length - 1];
   }
 
   function popularStores() {
@@ -165,20 +189,21 @@ App.Pages.Home = (function () {
     return picks;
   }
 
+  // Discovery card, not an ordering widget — tapping it goes straight to
+  // the shop that actually sells this item (its menu is the only place
+  // that can add it to a cart); there's deliberately no quick-add button
+  // here any more (see the file header note on discovery vs. ordering).
   function reorderCard(item) {
     const store = App.Stores.getById(item.store_id);
     return `
-      <div class="card card-hover reorder-card" data-action="open-food" data-id="${esc(item.id)}">
+      <div class="card card-hover reorder-card" data-action="open-store" data-id="${esc(item.store_id)}">
         <div class="reorder-card-img-wrap">
-          ${item.image ? `<img class="fade-img" src="${esc(item.image)}" alt="${esc(item.name)}" loading="lazy" onload="this.classList.add('loaded')" />` : `<div class="store-card-cover-fallback"><i data-lucide="utensils"></i></div>`}
+          ${item.image ? `<img onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback')" class="fade-img" src="${esc(item.image)}" alt="${esc(item.name)}" loading="lazy" onload="this.classList.add('loaded')" />` : `<div class="store-card-cover-fallback"><i data-lucide="utensils"></i></div>`}
         </div>
         <div class="card-pad" style="padding:12px;">
           <div class="font-semibold" style="font-size:13.5px;line-height:1.3;">${esc(item.name)}</div>
           <div class="text-xs text-muted" style="margin:2px 0 6px;">${store ? esc(store.name) : ''}</div>
-          <div class="flex justify-between items-center">
-            <span class="font-bold" style="font-size:13px;">${money(item.price)}</span>
-            <button type="button" class="btn-icon" style="width:30px;height:30px;min-width:30px;min-height:30px;" data-action="reorder-quick-add" data-id="${esc(item.id)}" aria-label="Add again"><i data-lucide="plus" style="width:15px;height:15px;"></i></button>
-          </div>
+          <span class="font-bold" style="font-size:13px;">${money(U.menuItemPrice(item))}</span>
         </div>
       </div>`;
   }
@@ -202,39 +227,54 @@ App.Pages.Home = (function () {
     return new Set(allStores().map(s => s.id));
   }
 
+  // Deliberately "starts with", not "contains anywhere" — typing "quarter"
+  // should surface Quarter Chicken, not every item that happens to mention
+  // it in a description. A category name also matches this way ("breakfast"
+  // -> every Breakfast-category item), so a customer can search either a
+  // dish or a whole meal category from the same box.
+  function searchMatchesMenuItem(item, term) {
+    const t = term.trim().toLowerCase();
+    if (!t) return true;
+    return item.name.toLowerCase().startsWith(t) || (item.category || '').toLowerCase().startsWith(t);
+  }
+
   function recommendedItems() {
     const storeIds = visibleStoreIds();
     let items = visibleMenu().filter(m => storeIds.has(m.store_id) && m.available && m.stock > 0);
     if (local.foodCategory !== 'All') items = items.filter(m => m.category === local.foodCategory);
-    if (local.search) {
-      const t = local.search.toLowerCase();
-      items = items.filter(m => m.name.toLowerCase().includes(t) || (m.description || '').toLowerCase().includes(t));
-    }
-    return [...items]
-      .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (b.rating_count || 0) - (a.rating_count || 0))
-      .slice(0, 8);
+    if (local.search) items = items.filter(m => searchMatchesMenuItem(m, local.search));
+    // Food from the student's own campus(es) first, then the rest.
+    const itemRank = (m) => { const st = App.Stores.getById(m.store_id); return st ? campusRank(st) : 1; };
+    const sorted = [...items].sort((a, b) => itemRank(a) - itemRank(b) || (b.rating || 0) - (a.rating || 0) || (b.rating_count || 0) - (a.rating_count || 0));
+    // Only cap to a short row when this is the normal "Popular Near You"
+    // teaser — an active search is meant to be the full, scrollable result
+    // list, not a preview.
+    return local.search ? sorted : sorted.slice(0, 8);
   }
 
+  // Discovery card only — this is "Popular Near You" / search results, not
+  // a shop's own menu, so there is deliberately no add-to-cart button
+  // here. Tapping it opens the shop that sells the item (App.Stores
+  // already owns the item<->store relationship via item.store_id, no new
+  // lookup/state needed); the shop's own menu is where it can actually be
+  // added, matching a real ordering app's browse->shop->order flow rather
+  // than letting a discovery card double as a mini ordering widget.
   function recommendedFoodCard(item) {
     const store = App.Stores.getById(item.store_id);
     const outOfStock = App.Menu.isOutOfStock(item);
     return `
-    <div class="card card-hover menu-card" data-action="open-food" data-id="${esc(item.id)}">
+    <div class="card card-hover menu-card" data-action="open-store" data-id="${esc(item.store_id)}">
       <div class="menu-card-img">
-        ${item.image ? `<img class="fade-img" src="${esc(item.image)}" alt="${esc(item.name)}" loading="lazy" onload="this.classList.add('loaded')" onerror="this.src='https://placehold.co/400x300?text=Campus+Eats'; this.classList.add('loaded');" />`
+        ${item.image ? `<img class="fade-img" src="${esc(item.image)}" alt="${esc(item.name)}" loading="lazy" onload="this.classList.add('loaded')" onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback'); this.classList.add('loaded');" />`
           : `<div class="home-food-img-fallback"><i data-lucide="utensils"></i></div>`}
         ${outOfStock ? `<div class="out-of-stock-overlay">Out of Stock</div>` : ''}
       </div>
       <div class="menu-card-body">
-        <div class="menu-card-title-row"><span class="font-bold">${esc(item.name)}</span></div>
-        ${item.rating_count > 0 ? `<div class="rating-inline"><i data-lucide="star" style="width:12px;height:12px;"></i> ${(item.rating || 0).toFixed(1)} <span class="text-muted" style="font-weight:500;">(${item.rating_count})</span></div>` : ''}
-        ${store ? `<div class="text-xs text-muted" style="margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(store.name)}</div>` : ''}
-        <p class="menu-card-desc">${esc(item.description || '')}</p>
+        <span class="menu-card-name">${esc(item.name)}</span>
+        ${store ? `<div class="menu-card-store">${esc(store.name)}${item.rating_count > 0 ? ` · <i data-lucide="star" style="width:11px;height:11px;"></i> ${(item.rating || 0).toFixed(1)}` : ''}</div>` : ''}
         <div class="menu-card-footer">
-          <span class="price-tag">${money(item.price)}</span>
-          <button class="btn btn-primary btn-sm" data-action="store-quick-add" data-id="${esc(item.id)}" ${outOfStock ? 'disabled' : ''}>
-            ${outOfStock ? 'Unavailable' : '<i data-lucide="plus"></i>Add'}
-          </button>
+          <span class="price-tag">${money(U.menuItemPrice(item))}</span>
+          ${outOfStock ? `<span class="text-xs text-muted font-semibold">Unavailable</span>` : ''}
         </div>
       </div>
     </div>`;
@@ -281,20 +321,58 @@ App.Pages.Home = (function () {
     }, 6000);
   }
 
+  // Updates the hero banner's media/link/dots IN PLACE instead of
+  // replacing the whole subtree (root.outerHTML used to rebuild it from
+  // scratch every single rotation tick). Even with the next image
+  // preloaded, a brand-new <img>/<video> element still forces a fresh
+  // decode+layout+paint — visible as a flash/flicker every 6 seconds,
+  // which is what was actually causing the reported "vibrating" picture,
+  // not an illusion. Swapping the existing element's src instead lets the
+  // browser reuse the already-decoded, already-preloaded resource with no
+  // visible transition at all. Only falls back to replacing the one media
+  // element (not the whole hero) when the kind itself changes (e.g.
+  // rotating from a video promo to an image promo).
   function refreshHeroDom() {
     const root = document.getElementById('hero-banner-root');
     if (!root) return; // navigated away from the home screen — nothing to update
-    // Clicking a hero dot leaves IT focused; outerHTML then destroys that
-    // very button, and the browser's default focus-fallback to <body>
-    // scrolls the page back to the top — a real, measured scroll jump,
-    // not a hypothetical one. Restoring scrollY right after the replace
-    // closes that gap regardless of what triggered the refresh (the
-    // 6-second timer never has this problem since nothing is focused,
-    // but a manual dot click always does).
-    const scrollY = window.scrollY;
-    root.outerHTML = heroSection();
-    window.scrollTo(0, scrollY);
-    if (window.lucide) lucide.createIcons();
+    const promos = activeStorePromotions();
+    if (!promos.length) return;
+    const idx = (local.heroIndex || 0) % promos.length;
+    const featured = promos[idx];
+    preloadNextHeroMedia(promos, idx);
+
+    const mediaWrap = root.querySelector('.hero-banner-media');
+    if (!mediaWrap) return;
+
+    const hasStore = !!featured.store_id;
+    const applyLink = (el) => {
+      el.dataset.action = hasStore ? 'open-store' : 'hero-scroll';
+      if (hasStore) el.dataset.id = featured.store_id; else delete el.dataset.id;
+    };
+    applyLink(mediaWrap);
+    const cta = root.querySelector('.hero-cta');
+    if (cta) applyLink(cta);
+
+    const wantVideo = featured.media_type === 'video' && !!featured.video_url;
+    const wantImage = !wantVideo && !!featured.image_url;
+    const existing = mediaWrap.querySelector('.hero-banner-img, .hero-banner-img-placeholder');
+
+    if (wantVideo && existing && existing.tagName === 'VIDEO') {
+      if (existing.getAttribute('src') !== featured.video_url) existing.src = featured.video_url;
+    } else if (wantImage && existing && existing.tagName === 'IMG') {
+      existing.src = featured.image_url;
+      existing.alt = featured.title || '';
+    } else {
+      const html = wantVideo
+        ? `<video class="hero-banner-img" src="${esc(featured.video_url)}" autoplay muted loop playsinline></video>`
+        : wantImage
+        ? `<img class="hero-banner-img" src="${esc(featured.image_url)}" alt="${esc(featured.title || '')}" />`
+        : `<div class="hero-banner-img-placeholder"><i data-lucide="megaphone"></i></div>`;
+      if (existing) existing.outerHTML = html; else mediaWrap.insertAdjacentHTML('afterbegin', html);
+      if (window.lucide) lucide.createIcons({ context: mediaWrap });
+    }
+
+    root.querySelectorAll('.hero-dot').forEach((dot, i) => dot.classList.toggle('active', i === idx));
   }
 
   // Fires off the next promo's media request ahead of time so the
@@ -332,7 +410,7 @@ App.Pages.Home = (function () {
       // the no-promotion fallback below.
       const linkAction = featured.store_id ? `data-action="open-store" data-id="${esc(featured.store_id)}"` : `data-action="hero-scroll"`;
       return `
-      <div class="hero-banner-wrap" id="hero-banner-root">
+      <div class="hero-banner-wrap" id="hero-banner-root" data-hero-key="${esc(featured.id)}">
         <div class="hero-banner-media" ${linkAction}>
           ${featured.media_type === 'video' && featured.video_url
             ? `<video class="hero-banner-img" src="${esc(featured.video_url)}" autoplay muted loop playsinline></video>`
@@ -364,11 +442,17 @@ App.Pages.Home = (function () {
     return ['All', ...locs];
   }
 
-  function activePromo() {
-    const promos = (S.state.promotions || []).filter(p => p.active &&
+  // A shop's own promo codes — shown only on that shop's page.
+  function shopPromos(storeId) {
+    return (S.state.promotions || []).filter(p => p.active && p.store_id === storeId &&
       (!p.expires_at || new Date(p.expires_at) > new Date()) &&
       (!p.usage_limit || (p.used_count || 0) < p.usage_limit));
-    return promos[0] || null;
+  }
+  // "50% off Kota Boss — use code GH3356 at checkout."
+  function promoText(p) {
+    const amount = p.type === 'percentage' ? `${Number(p.value)}% off` : `${money(p.value)} off`;
+    const what = App.Promotions.productName(p);
+    return `${amount}${what ? ' ' + esc(what) : ''} — use code <strong>${esc(p.code)}</strong> at checkout.`;
   }
 
   // ---------------- Store-purchased promotional placements ----------------
@@ -377,10 +461,6 @@ App.Pages.Home = (function () {
     return (S.state.storePromotions || [])
       .filter(p => p.status === 'approved' && p.active && (!p.start_date || new Date(p.start_date) <= now) && (!p.end_date || new Date(p.end_date) > now))
       .sort((a, b) => (b.priority || 0) - (a.priority || 0));
-  }
-
-  function cartCount() {
-    return (S.state.cart || []).reduce((sum, c) => sum + (c.qty || 0), 0);
   }
 
   // A real aggregate across every currently visible shop's own real
@@ -404,7 +484,7 @@ App.Pages.Home = (function () {
     return `
     <div class="store-mini-card" data-action="open-store" data-id="${esc(store.id)}">
       <div class="store-mini-img">
-        ${store.cover_image_url ? `<img src="${esc(store.cover_image_url)}" alt="${esc(store.name)}" loading="lazy" />` : `<div class="store-mini-img-fallback"><i data-lucide="store"></i></div>`}
+        ${store.cover_image_url ? `<img onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback')" src="${esc(store.cover_image_url)}" alt="${esc(store.name)}" loading="lazy" />` : `<div class="store-mini-img-fallback"><i data-lucide="store"></i></div>`}
         <span class="badge ${open ? 'badge-success' : 'badge-error'} store-mini-status">${open ? 'OPEN' : 'CLOSED'}</span>
       </div>
       <div class="store-mini-body">
@@ -449,7 +529,7 @@ App.Pages.Home = (function () {
         <div class="store-card-info">
           <div class="store-card-avail ${open ? 'is-open' : ''}">${availability}</div>
           <div class="store-card-name-row">
-            ${store.logo_url ? `<img class="store-card-logo" src="${esc(store.logo_url)}" alt="" />` : `<div class="store-card-logo store-card-logo-fallback"><i data-lucide="utensils" style="width:12px;height:12px;"></i></div>`}
+            ${store.logo_url ? `<img onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback')" class="store-card-logo" src="${esc(store.logo_url)}" alt="" />` : `<div class="store-card-logo store-card-logo-fallback"><i data-lucide="utensils" style="width:12px;height:12px;"></i></div>`}
             <h3 class="store-card-name">${esc(store.name)}</h3>
             <button type="button" class="store-card-fav-btn ${isFav ? 'active' : ''}" data-action="toggle-favorite-store" data-id="${esc(store.id)}" aria-label="${isFav ? 'Remove from favorites' : 'Add to favorites'}">
               <i data-lucide="heart" style="${isFav ? 'fill:currentColor' : ''}"></i>
@@ -463,7 +543,7 @@ App.Pages.Home = (function () {
         </div>
         <div class="store-card-cover">
           <div class="store-card-cover-img-wrap">
-            ${cover ? `<img class="fade-img" src="${cover}" alt="${esc(store.name)}" loading="lazy" onload="this.classList.add('loaded')" />` : `<div class="store-card-cover-fallback"><i data-lucide="store"></i></div>`}
+            ${cover ? `<img onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback')" class="fade-img" src="${cover}" alt="${esc(store.name)}" loading="lazy" onload="this.classList.add('loaded')" />` : `<div class="store-card-cover-fallback"><i data-lucide="store"></i></div>`}
           </div>
           <span class="badge ${open ? 'badge-success' : 'badge-error'} store-card-status">${open ? 'OPEN' : 'CLOSED'}</span>
         </div>
@@ -495,7 +575,6 @@ App.Pages.Home = (function () {
       </div>`;
     }
 
-    const promo = activePromo();
     const popular = popularStores();
     // "All stores on campus" shouldn't repeat a shop's large cover image
     // right after "Popular Shops" already showed it — but only while the
@@ -523,40 +602,46 @@ App.Pages.Home = (function () {
     const foodCats = foodCategories();
     const recommended = recommendedItems();
     const eta = pickupEtaRange();
-    const pickupLocation = (S.state.profile && S.state.profile.campus_location) || locations.find(l => l !== 'All') || 'On campus';
+    const mine = myCampuses();
+    const campusStores = myCampusStores();
+    const pickupLocation = campusesLabel(mine) || locations.find(l => l !== 'All') || 'On campus';
     // Skip whichever promo the hero above is already showing full-size —
     // same real store_promotions rows, just never shown twice on one page.
     const promoRow = activeStorePromotions().slice(1);
 
-    // The Top Advert is a single developer-controlled slot, entirely
-    // separate from store_promotions/activeStorePromotions above — RLS
-    // (schema.sql section 28) means this can only ever be null or an
-    // already published+active row, never a draft, so no extra status
-    // check is needed here. While null, the topbar is just its plain
-    // black pills row. Once an advert exists, its image/video IS the
-    // topbar's own full-bleed background — not a separate inset box
-    // with black space around it — and the pickup/ETA pills sit on top
-    // of it directly, so the real photo fills the whole area edge to
-    // edge.
-    const advert = S.state.topAdvert;
-    const hasAdvert = !!(advert && advert.media_url);
+    // Actively searching means the customer wants exactly one thing: the
+    // matching food, and nothing else competing for their scroll — no
+    // shops, no promos, no category browsing. Clearing the box (local.search
+    // back to '') snaps straight back to the normal full layout below since
+    // everything here is just driven by that one piece of state.
+    const isSearching = !!local.search;
+    if (isSearching) {
+      return `
+      <div class="storefront-topbar">
+        <div class="storefront-topbar-pills">
+          <div class="storefront-topbar-pickup"><i data-lucide="map-pin" style="width:12px;height:12px;"></i> ${esc(pickupLocation)}</div>
+          ${eta ? `<div class="storefront-topbar-eta">${esc(eta)}</div>` : ''}
+        </div>
+      </div>
+      <div class="storefront-curved">
+        <div class="search-bar mb-3" id="discover-section">
+          <i data-lucide="search"></i>
+          <input type="text" id="discover-search-input" placeholder="Search food, meals or shops" value="${esc(local.search)}" data-action-input="marketplace-search" aria-label="Search stores or food" />
+        </div>
+        <div class="flex justify-between items-center mb-2">
+          <span class="section-title" style="font-size:16px;">${recommended.length ? `Results for &ldquo;${esc(local.search)}&rdquo;` : ''}</span>
+        </div>
+        ${recommended.length
+          ? `<div class="grid grid-menu">${recommended.map(recommendedFoodCard).join('')}</div>`
+          : `<div class="empty-state mb-4"><div class="icon-wrap"><i data-lucide="search-x"></i></div><h3>No matches for "${esc(local.search)}"</h3><p class="text-sm">Try a different search term.</p></div>`}
+      </div>`;
+    }
     return `
-    <div class="storefront-topbar${hasAdvert ? ' has-media' : ''}">
-      ${hasAdvert ? `
-      <div class="storefront-topbar-media">
-        ${advert.media_type === 'video'
-          ? `<video src="${esc(advert.media_url)}" autoplay muted loop playsinline></video>`
-          : `<img src="${esc(advert.media_url)}" alt="${esc(advert.title || 'Advertisement')}" />`}
-      </div>` : ''}
+    <div class="storefront-topbar">
       <div class="storefront-topbar-pills">
         <div class="storefront-topbar-pickup"><i data-lucide="map-pin" style="width:12px;height:12px;"></i> ${esc(pickupLocation)}</div>
         ${eta ? `<div class="storefront-topbar-eta">${esc(eta)}</div>` : ''}
       </div>
-      ${hasAdvert && (advert.title || advert.promo_text) ? `
-      <div class="storefront-advert-caption">
-        ${advert.title ? `<div class="storefront-advert-title">${esc(advert.title)}</div>` : ''}
-        ${advert.promo_text ? `<div class="storefront-advert-sub">${esc(advert.promo_text)}</div>` : ''}
-      </div>` : ''}
     </div>
     <div class="storefront-curved">
       ${S.state.dataLoadError ? `
@@ -571,6 +656,14 @@ App.Pages.Home = (function () {
         <input type="text" id="discover-search-input" placeholder="Search food, meals or shops" value="${esc(local.search)}" data-action-input="marketplace-search" aria-label="Search stores or food" />
       </div>
 
+      ${mine.length ? `
+      <div class="flex justify-between items-center mb-2" id="my-campus-section">
+        <span class="section-title" style="font-size:16px;"><i data-lucide="map-pin" style="width:15px;height:15px;color:var(--color-primary);vertical-align:-2px;"></i> Shops at ${esc(campusesLabel(mine))}</span>
+      </div>
+      ${campusStores.length
+        ? `<div class="store-mini-row mb-4">${campusStores.map(storeMiniCard).join('')}</div>`
+        : `<div class="offline-note mb-4"><i data-lucide="store"></i><span>No shops at ${esc(campusesLabel(mine))} on clickFud yet — showing shops at other campuses below.</span></div>`}` : ''}
+
       ${locations.length > 2 ? `
       <div class="location-select-row mb-3">
         <i data-lucide="map-pin" style="width:14px;height:14px;color:var(--color-primary);"></i>
@@ -579,7 +672,6 @@ App.Pages.Home = (function () {
         </select>
       </div>` : ''}
 
-      ${promo ? `<div class="promo-banner mb-3"><i data-lucide="tag"></i>${promo.type === 'percentage' ? `${promo.value}% off` : `${money(promo.value)} off`} with code <strong>${esc(promo.code)}</strong> — applied at checkout!</div>` : ''}
 
       ${foodCats.length ? `
       <div class="flex justify-between items-center mb-2">
@@ -674,14 +766,14 @@ App.Pages.Home = (function () {
     return `
     <div class="shop-prod-card" data-action="open-food" data-id="${esc(item.id)}">
       <div class="shop-prod-img">
-        <img src="${esc(item.image || '')}" alt="${esc(item.name)}" loading="lazy" onerror="this.src='https://placehold.co/400x300?text=Campus+Eats'">
+        <img src="${esc(item.image || '')}" alt="${esc(item.name)}" loading="lazy" onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback')">
         ${outOfStock ? `<div class="out-of-stock-overlay">Out of Stock</div>` : ''}
       </div>
       <div class="shop-prod-body">
         <div class="shop-prod-name">${esc(item.name)}</div>
         ${item.rating_count ? `<div class="shop-prod-rating"><i data-lucide="star" style="width:11px;height:11px;fill:#FFC107;color:#FFC107;"></i> ${Number(item.rating || 0).toFixed(1)} (${item.rating_count})</div>` : ''}
         <div class="shop-prod-footer">
-          <span class="shop-prod-price">${money(item.price)}</span>
+          <span class="shop-prod-price">${money(U.menuItemPrice(item))}</span>
           <button class="shop-prod-add" data-action="store-quick-add" data-id="${esc(item.id)}" ${outOfStock ? 'disabled' : ''} aria-label="Add ${esc(item.name)} to cart">
             <i data-lucide="plus"></i>
           </button>
@@ -772,6 +864,46 @@ App.Pages.Home = (function () {
       </button>`, { sheet: true });
   }
 
+  // ---------------- "Start Order" guided flow (public home page only) ----------------
+  // Collection only for now (no delivery), so the flow is just: pick your
+  // university and campus. The delivery code paths stay dormant in checkout
+  // and the schema for a later phase.
+  function guestOrderStep2Html() {
+    const d = local.guestOrderDraft;
+    const campuses = App.CONST.UNIVERSITY_CAMPUSES[d.university] || [];
+    return `
+    <div class="modal-header"><span class="modal-title">Which university are you at?</span><button class="modal-close" data-action="close-modal"><i data-lucide="x"></i></button></div>
+    <div class="modal-body">
+      <div class="field"><label>University</label>
+        <select class="select" data-action-change="guest-order-university">
+          ${App.CONST.UNIVERSITIES.map(u => `<option value="${esc(u)}" ${d.university === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Campus</label>
+        <select class="select" data-action-change="guest-order-campus">
+          <option value="">Select a campus</option>
+          ${campuses.map(c => `<option value="${esc(c)}" ${d.campus === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer" style="padding:16px 0 0;">
+      <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
+      <button type="button" class="btn btn-primary" data-action="guest-order-continue" ${d.campus ? '' : 'disabled'}>Continue</button>
+    </div>`;
+  }
+
+  function startOrderFlow() {
+    // Collection is the only way to receive an order for now (no delivery),
+    // so there's nothing to choose — go straight to picking the campus.
+    local.guestOrderDraft = { fulfilment: 'collection', university: App.CONST.UNIVERSITIES[0], campus: (local.guestOrder && local.guestOrder.campus) || null };
+    App.Modal.open(guestOrderStep2Html());
+  }
+
+  function scrollToDiscoverShops() {
+    const el = document.getElementById('discover-shops-section');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   function renderStoreDetail(storeId) {
     const store = App.Stores.getById(storeId);
     if (!store) {
@@ -792,8 +924,7 @@ App.Pages.Home = (function () {
     if (search) {
       // Search collapses the categorized layout into one flat results
       // grid — existing search behavior, just restyled onto the new card.
-      const t = search.toLowerCase();
-      const results = items.filter(m => m.name.toLowerCase().includes(t) || (m.description || '').toLowerCase().includes(t));
+      const results = items.filter(m => searchMatchesMenuItem(m, search));
       menuBody = results.length
         ? `<div class="shop-menu-grid">${results.map(shopProductCard).join('')}</div>`
         : `<div class="empty-state"><div class="icon-wrap"><i data-lucide="utensils-crossed"></i></div><h3>No matches</h3><p class="text-sm">Try a different search term.</p></div>`;
@@ -822,7 +953,7 @@ App.Pages.Home = (function () {
     return `
     <div class="store-detail">
       <div class="shop-hero">
-        ${store.cover_image_url ? `<img class="fade-img" src="${esc(store.cover_image_url)}" alt="${esc(store.name)}" onload="this.classList.add('loaded')" />` : `<div class="shop-hero-fallback"><i data-lucide="store"></i></div>`}
+        ${store.cover_image_url ? `<img onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback')" class="fade-img" src="${esc(store.cover_image_url)}" alt="${esc(store.name)}" onload="this.classList.add('loaded')" />` : `<div class="shop-hero-fallback"><i data-lucide="store"></i></div>`}
         <div class="shop-hero-actions">
           <button type="button" class="shop-hero-icon-btn" data-action="go-home" aria-label="Back to stores"><i data-lucide="arrow-left"></i></button>
           <div class="shop-hero-actions-right">
@@ -835,7 +966,7 @@ App.Pages.Home = (function () {
       <div class="storefront-curved">
         <div class="shop-info-card">
           <div class="shop-info-name-row">
-            ${store.logo_url ? `<img class="shop-info-logo" src="${esc(store.logo_url)}" alt="" />` : `<div class="shop-info-logo store-card-logo-fallback"><i data-lucide="utensils" style="width:16px;height:16px;"></i></div>`}
+            ${store.logo_url ? `<img onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback')" class="shop-info-logo" src="${esc(store.logo_url)}" alt="" />` : `<div class="shop-info-logo store-card-logo-fallback"><i data-lucide="utensils" style="width:16px;height:16px;"></i></div>`}
             <h1 class="shop-info-name">${esc(store.name)}</h1>
           </div>
           ${store.category ? `<div class="text-sm text-muted mb-1">${esc(store.category)}</div>` : ''}
@@ -856,6 +987,8 @@ App.Pages.Home = (function () {
 
         ${!open ? `<div class="closed-banner"><i data-lucide="clock"></i><div><strong>${esc(store.name)} is closed</strong><div class="text-sm">${esc(App.Stores.closedMessage(store))}</div></div></div>` : ''}
 
+        ${shopPromos(storeId).map(p => `<div class="promo-banner mb-3"><i data-lucide="tag"></i><span>${promoText(p)}</span></div>`).join('')}
+
         <div class="search-bar mb-3">
           <i data-lucide="search"></i>
           <input type="text" id="store-search-input" placeholder="Search ${esc(store.name)}'s menu..." value="${esc(search)}" data-action-input="store-search" data-store-id="${esc(storeId)}" aria-label="Search menu" />
@@ -868,37 +1001,321 @@ App.Pages.Home = (function () {
     </div>`;
   }
 
+  // ---------------- Public marketing homepage (logged-out visitors) ----------------
+  // A genuinely separate page from renderBrowser()/renderStoreDetail() above
+  // (both untouched — customer.js still calls them directly for the
+  // logged-in experience). This is the first thing a guest sees: a real
+  // marketing/introduction page, not the functional shop browser. Clicking
+  // into an actual shop still uses the same real renderStoreDetail() via
+  // the existing 'open-store' action — nothing about that flow changed.
+  // Real developer-uploaded photo for this slot (see
+  // js/home-page-media.js) — a plain CSS decorative panel otherwise,
+  // never a fabricated stock image.
+  function homeMediaUrl(slot) { return (S.state.homePageMedia || {})[slot] || null; }
+  function homeMediaText(slot) { return (S.state.homePageMediaText || {})[slot] || {}; }
+
+  // Hand-drawn-style curved underline under "Your Click." — an inline
+  // SVG path (per spec: not a plain CSS border-bottom), deliberately
+  // slightly irregular rather than a straight line.
+  function mheroUnderlineSvg() {
+    return `<svg class="mhero-underline" width="180" height="18" viewBox="0 0 180 18" fill="none" aria-hidden="true">
+      <path d="M2 12C40 4 120 2 178 10" stroke="var(--color-primary)" stroke-width="6" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  function mHeroSection() {
+    const heroImg = homeMediaUrl('hero');
+    return `
+    <section class="mhero-full">
+      <div class="mhero-full-media">
+        ${heroImg
+          ? `<img class="mhero-full-img" src="${esc(heroImg)}" alt="" />`
+          : `<div class="mhero-full-fallback"></div>`}
+        <div class="mhero-full-scrim"></div>
+      </div>
+      <div class="mhero-full-content container">
+        <span class="mhero-pill"><i data-lucide="utensils"></i> Campus Food. Made Easy.</span>
+        <h1 class="mhero-title-lg">Your Campus.<br>Your Food.<br><span class="mhero-highlight">Your Click.</span>${mheroUnderlineSvg()}</h1>
+        <p class="mhero-sub-lg">Order from your favourite food shops, skip the queue, and collect your meal when it’s ready.</p>
+      </div>
+    </section>
+    <div class="container mhero-below">
+      <div class="search-bar mhero-search-floating">
+        <i data-lucide="search"></i>
+        <input type="text" id="home-search-input" placeholder="Search food, meals or shops" value="${esc(local.search)}" data-action-input="marketplace-search" aria-label="Search food, meals or shops" />
+        ${App.Utils.speechRecognitionSupported && App.Utils.speechRecognitionSupported() ? `<button type="button" class="mhero-search-mic" data-action="voice-search" aria-label="Search by voice"><i data-lucide="mic"></i></button>` : ''}
+      </div>
+      <div class="mhero-actions">
+        <button type="button" class="btn btn-primary btn-lg" data-action="start-order">Start Order <i data-lucide="arrow-right"></i></button>
+        <button type="button" class="btn btn-secondary btn-lg" data-action="storefront-goto" data-target="discover-shops-section"><i data-lucide="store"></i> Explore Shops</button>
+      </div>
+      <div class="mbenefits-row">
+        <div class="mbenefit-item"><div class="mbenefit-icon"><i data-lucide="shopping-bag"></i></div><div><strong>Collection</strong><span>Pick up easily</span></div></div>
+        <div class="mbenefit-divider"></div>
+        <div class="mbenefit-item"><div class="mbenefit-icon"><i data-lucide="shield-check"></i></div><div><strong>Safe &amp; Secure</strong><span>Your food, our priority</span></div></div>
+      </div>
+    </div>`;
+  }
+
+  // Real, live counts — never fabricated — pulled from the exact same
+  // approved/published store + available-menu-item data every other
+  // section on this page already uses.
+  function liveStats() {
+    const stores = allStores();
+    const openCount = stores.filter(s => App.Stores.isOpenNow(s)).length;
+    const itemCount = visibleMenu().filter(m => m.available && m.stock > 0).length;
+    return { shops: stores.length, open: openCount, items: itemCount };
+  }
+
+  function mLiveStatsSection() {
+    const stats = liveStats();
+    return `
+    <section class="mstats mreveal">
+      <div class="container mstats-row">
+        <div class="mstat"><span class="mstat-value" data-count="${stats.shops}">0</span><span class="mstat-label">Food Shops on clickFud</span></div>
+        <div class="mstat"><span class="mstat-value" data-count="${stats.open}">0</span><span class="mstat-label"><span class="live-dot"></span>Open Right Now</span></div>
+        <div class="mstat"><span class="mstat-value" data-count="${stats.items}">0</span><span class="mstat-label">Meals Available</span></div>
+      </div>
+    </section>`;
+  }
+
+  // ---------------- Food Categories (real, app-style horizontal chips) ----------------
+  // Same real data/icons/action as renderBrowser()'s category row — the
+  // guest page now offers actual filtering (of the Popular Food row
+  // below), not decorative marketing copy.
+  function mCategoriesSection() {
+    const cats = foodCategories();
+    if (!cats.length) return '';
+    return `
+    <section class="msection msection-tight mreveal">
+      <div class="container">
+        <div class="msection-header-row">
+          <h2 class="msection-title-sm">Food Categories</h2>
+          <button type="button" class="view-all-link" data-action="food-category" data-category="All">View All <i data-lucide="arrow-right" style="width:13px;height:13px;"></i></button>
+        </div>
+        <div class="category-icon-row">
+          <button class="category-icon-card ${local.foodCategory === 'All' ? 'active' : ''}" data-action="food-category" data-category="All">
+            <span class="category-icon-badge"><i data-lucide="layout-grid"></i></span><span>All</span>
+          </button>
+          ${cats.map(c => `
+          <button class="category-icon-card ${local.foodCategory === c ? 'active' : ''}" data-action="food-category" data-category="${esc(c)}">
+            <span class="category-icon-badge"><i data-lucide="${FOOD_CATEGORY_ICONS[c] || 'utensils'}"></i></span><span>${esc(c)}</span>
+          </button>`).join('')}
+        </div>
+      </div>
+    </section>`;
+  }
+
+  // ---------------- Promotions (real store promos + the two uploaded
+  // brand photos) — a horizontal carousel, app-advertisement style,
+  // instead of long-form "About"/"Hungry Between Lectures" editorial
+  // sections. The about/lectures uploaded photos still appear here —
+  // never dropped — just as promo-style cards instead of side-images
+  // next to paragraphs. ----------------
+  function brandedPromoCard(title, sub, img, targetId) {
+    return `
+    <div class="promo-mini-card" data-action="storefront-goto" data-target="${targetId}">
+      <div class="promo-mini-img"><img src="${esc(img)}" alt="${esc(title)}" loading="lazy" /></div>
+      <div class="promo-mini-title">${esc(title)}</div>
+      <div class="promo-mini-sub">${esc(sub)}</div>
+    </div>`;
+  }
+
+  function mPromotionsSection() {
+    const promos = activeStorePromotions();
+    const aboutImg = homeMediaUrl('about');
+    const lecturesImg = homeMediaUrl('lectures');
+    const aboutText = homeMediaText('about');
+    const lecturesText = homeMediaText('lectures');
+    const brandedCards = [];
+    if (aboutImg) brandedCards.push(brandedPromoCard(aboutText.title || 'About clickFud', aboutText.subtitle || 'Local food. Real convenience.', aboutImg, 'discover-shops-section'));
+    if (lecturesImg) brandedCards.push(brandedPromoCard(lecturesText.title || 'Hungry Between Lectures?', lecturesText.subtitle || 'Order ahead, skip the queue.', lecturesImg, 'discover-shops-section'));
+    if (!promos.length && !brandedCards.length) return '';
+    return `
+    <section class="msection msection-tight mreveal">
+      <div class="container">
+        <h2 class="msection-title-sm">Promotions</h2>
+        <div class="promo-mini-row">${promos.map(promoMiniCard).join('')}${brandedCards.join('')}</div>
+      </div>
+    </section>`;
+  }
+
+  // ---------------- Popular Food (real menu items) ----------------
+  // New on the guest page — reuses the exact same real, tested
+  // recommendedItems()/recommendedFoodCard() already powering the
+  // logged-in customer's "Popular Near You" row, respecting whatever
+  // category/search the customer has picked above.
+  function mPopularFoodSection() {
+    const isSearching = !!local.search;
+    const items = recommendedItems();
+    if (!items.length && !isSearching) return '';
+    return `
+    <section class="msection msection-tight msection-tint mreveal" id="popular-food-section">
+      <div class="container">
+        <h2 class="msection-title-sm">${isSearching ? `Results for &ldquo;${esc(local.search)}&rdquo;` : 'Popular Food'}</h2>
+        ${items.length
+          ? `<div class="${isSearching ? 'grid grid-menu' : 'recommended-row'}">${items.map(recommendedFoodCard).join('')}</div>`
+          : `<div class="empty-state"><div class="icon-wrap"><i data-lucide="search-x"></i></div><h3>No matches for "${esc(local.search)}"</h3><p class="text-sm">Try a different search term.</p></div>`}
+      </div>
+    </section>`;
+  }
+
+  function landingShopCard(store) {
+    const open = App.Stores.isOpenNow(store);
+    return `
+    <div class="mshop-card" data-action="open-store" data-id="${esc(store.id)}">
+      <div class="mshop-card-img">
+        ${store.cover_image_url ? `<img onerror="this.onerror=null;this.src='icons/clickfud-icon-192.png';this.classList.add('img-fallback')" src="${esc(store.cover_image_url)}" alt="${esc(store.name)}" loading="lazy" />` : `<div class="mshop-card-img-fallback"><i data-lucide="utensils"></i></div>`}
+        <span class="badge ${open ? 'badge-success' : 'badge-error'} mshop-card-status">${open ? '<span class="live-dot"></span>Open' : 'Closed'}</span>
+      </div>
+      <div class="mshop-card-body">
+        <div class="mshop-card-name">${esc(store.name)}</div>
+        <div class="text-xs text-muted">${esc(store.category || '')}</div>
+        ${store.accepts_collection ? `<div class="mshop-card-fulfil"><i data-lucide="shopping-bag" style="width:11px;height:11px;"></i> Collection</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function mDiscoverShopsSection() {
+    if (!S.state.dataReady) {
+      return `
+      <section class="msection msection-tight mreveal" id="discover-shops-section">
+        <div class="container">
+          <h2 class="msection-title-sm">Featured Shops</h2>
+          <div class="store-mini-row">${Array(4).fill(0).map(skeletonStoreCard).join('')}</div>
+        </div>
+      </section>`;
+    }
+    // Actively searching hands the whole results area to mPopularFoodSection
+    // (food items only, no shop cards competing for scroll) — this section
+    // steps aside entirely rather than showing its own separate "Results
+    // for X" shop list alongside it.
+    if (local.search) return '';
+    const shops = local.showAllShops ? sortStores(allStores()) : popularStores();
+    return `
+    <section class="msection msection-tight mreveal" id="discover-shops-section">
+      <div class="container">
+        <div class="msection-header-row">
+          <h2 class="msection-title-sm">Featured Shops</h2>
+          ${!local.showAllShops && allStores().length > shops.length ? `<button type="button" class="view-all-link" data-action="marketplace-view-all">View All</button>` : ''}
+        </div>
+        ${local.guestOrder ? `
+        <div class="guest-order-banner mb-3">
+          <i data-lucide="shopping-bag"></i>
+          <span>Collection &middot; ${esc(local.guestOrder.campus)}</span>
+          <button type="button" data-action="guest-order-change">Change</button>
+        </div>` : ''}
+        ${shops.length
+          ? (local.showAllShops ? `<div class="mshop-grid">${shops.map(landingShopCard).join('')}</div>` : `<div class="store-mini-row">${shops.map(storeMiniCard).join('')}</div>`)
+          : `<div class="empty-state"><div class="icon-wrap"><i data-lucide="store"></i></div><h3>No shops live yet</h3><p class="text-sm">Check back soon — new food shops are joining clickFud.</p></div>`}
+      </div>
+    </section>`;
+  }
+
+  function mFooter() {
+    return `
+    <footer class="home-footer">
+      <div class="home-footer-grid home-footer-grid-single container">
+        <div>
+          <a href="#" class="home-brand" data-action="go-home">${App.Shared.logoBadge()}<span class="home-brand-name">clickFud</span></a>
+          <p class="text-sm" style="color:#B6B4C0;margin-top:8px;">Campus food. Made easy.</p>
+        </div>
+      </div>
+    </footer>`;
+  }
+
+  // Scroll-reveal for every .mreveal section, plus a real count-up
+  // animation for the live stats strip once it scrolls into view — same
+  // "disconnect any previous observer first, it's watching stale DOM
+  // nodes after a re-render" pattern as initShopScrollSpy() above.
+  function initMarketingReveal() {
+    if (local._marketingObserver) { local._marketingObserver.disconnect(); local._marketingObserver = null; }
+    const els = [...document.querySelectorAll('.mreveal')];
+    if (!els.length) return;
+    local._marketingObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('mreveal-in');
+        if (entry.target.classList.contains('mstats')) animateStatCounts(entry.target);
+        local._marketingObserver.unobserve(entry.target);
+      });
+    }, { threshold: 0.15 });
+    els.forEach(el => local._marketingObserver.observe(el));
+  }
+
+  function animateStatCounts(root) {
+    root.querySelectorAll('.mstat-value[data-count]').forEach(el => {
+      const target = Number(el.dataset.count) || 0;
+      const start = performance.now();
+      const duration = 900;
+      function tick(now) {
+        const p = Math.min(1, (now - start) / duration);
+        el.textContent = String(Math.round(target * (1 - Math.pow(1 - p, 3)))); // ease-out cubic
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+  }
+
+  function renderMarketingHome() {
+    setTimeout(initMarketingReveal, 0);
+    return `
+    <div id="home-top"></div>
+    ${mHeroSection()}
+    ${mLiveStatsSection()}
+    ${mCategoriesSection()}
+    ${mPromotionsSection()}
+    ${mDiscoverShopsSection()}
+    ${mPopularFoodSection()}
+    ${mFooter()}`;
+  }
+
+  function publicHeaderInner() {
+    // No cart icon up here — a guest's one cart entry point is the
+    // bottom-nav center button (js/shared-ui.js renderBottomNav()); two
+    // cart icons on the same screen was redundant clutter.
+    return `
+    <div class="home-header-inner container">
+      <a href="#" class="home-brand mhome-brand-tag" data-action="go-home">
+        ${App.Shared.logoBadge()}
+        <span>
+          <span class="home-brand-name">clickFud</span>
+          <span class="mhome-tagline">Good Food. Fast.</span>
+        </span>
+      </a>
+      <nav class="mnav-links">
+        <a data-action="storefront-goto" data-target="home-top">Home</a>
+        <a data-action="storefront-goto" data-target="discover-shops-section">Food Shops</a>
+      </nav>
+      <div class="home-header-actions">
+        <button type="button" class="btn-icon home-theme-btn" data-action="toggle-theme" aria-label="${S.state.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">
+          <i data-lucide="${S.state.theme === 'dark' ? 'sun' : 'moon'}"></i>
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm home-login-btn" data-action="go-auth" data-tab="login">Log In</button>
+        <button type="button" class="btn btn-primary btn-sm btn-pill" data-action="go-auth" data-tab="signup">Sign Up</button>
+      </div>
+    </div>`;
+  }
+
   // ---------------- Public (logged-out) full page ----------------
   function categoryChips() { return storeCategories(); } // kept for backward compatibility of naming
 
   function render() {
     const route = S.state.route;
     const isStoreView = route.view === 'store' && route.params && route.params.storeId;
-    const count = cartCount();
+
+    if (isStoreView) {
+      return `
+      <div class="home-page">
+        <header class="home-header">${publicHeaderInner()}</header>
+        <div class="home-content container">${renderStoreDetail(route.params.storeId)}</div>
+      </div>`;
+    }
 
     return `
     <div class="home-page">
-      <header class="home-header">
-        <div class="home-header-inner container">
-          <a href="#" class="home-brand" data-action="go-home">
-            ${App.Shared.logoBadge()}
-            <span class="home-brand-name">clickFud</span>
-          </a>
-          <div class="home-header-actions">
-            <button type="button" class="btn-icon home-cart-btn" data-action="open-cart" aria-label="Cart">
-              <i data-lucide="shopping-cart"></i>
-              ${count > 0 ? `<span class="home-cart-badge">${count}</span>` : ''}
-            </button>
-            <button type="button" class="btn-icon" data-action="toggle-theme" aria-label="Toggle theme"><i data-lucide="sun-moon"></i></button>
-            <button type="button" class="btn btn-secondary btn-sm home-login-btn" data-action="go-auth" data-tab="login">Login</button>
-            <button type="button" class="btn btn-primary btn-sm" data-action="go-auth" data-tab="signup">Sign Up</button>
-          </div>
-        </div>
-      </header>
-
-      <div class="home-content container">
-        ${isStoreView ? renderStoreDetail(route.params.storeId) : renderBrowser()}
-      </div>
+      <header class="home-header">${publicHeaderInner()}</header>
+      ${renderMarketingHome()}
     </div>`;
   }
 
@@ -909,22 +1326,53 @@ App.Pages.Home = (function () {
     if (!item.available || item.stock <= 0) { App.Toast.error(`"${item.name}" is currently unavailable.`); return; }
     const store = App.Stores.getById(item.store_id);
     S.addToCartWithConfirm({
-      menuItemId: item.id, name: item.name, price: item.price, image: item.image,
+      menuItemId: item.id, name: item.name, price: U.menuItemPrice(item), image: item.image,
       qty: 1, addons: [], specialInstructions: '',
       storeId: item.store_id, storeName: store ? store.name : '',
     }, { onAdded: () => App.Toast.success(`Added "${item.name}" to your cart.`) });
   }
 
-  function handleAction(action, ds) {
+  function handleAction(action, ds, el) {
     switch (action) {
-      case 'open-store':
-        // setRoute() never touches scroll position on its own — without
-        // this, opening a shop from partway down a long store list left
-        // the new (much shorter, differently laid out) shop page scrolled
-        // to whatever pixel offset the list happened to be at, hiding its
-        // own header/banner/category nav entirely on load.
-        window.scrollTo(0, 0);
-        return S.setRoute({ view: 'store', params: { storeId: ds.id } });
+      case 'voice-search': {
+        if (el) el.classList.add('listening');
+        App.Utils.startVoiceSearch({
+          onResult: (transcript) => {
+            if (!transcript) return;
+            local.search = transcript;
+            const input = document.getElementById('home-search-input');
+            if (input) input.value = transcript;
+            App.render();
+          },
+          onError: () => { App.Toast.error("Couldn't hear that — please try again or type instead."); },
+          onEnd: () => { if (el) el.classList.remove('listening'); },
+        });
+        return;
+      }
+      case 'start-order':
+        return startOrderFlow();
+      case 'guest-order-continue': {
+        if (!local.guestOrderDraft.campus) return;
+        local.guestOrder = Object.assign({}, local.guestOrderDraft);
+        local.guestOrderDraft = null;
+        // Carried across the login/signup boundary (js/pages/customer.js
+        // startCheckout() reads this once) so a guest who already chose
+        // Delivery/Collection here never has to pick it again just
+        // because they created an account partway through ordering —
+        // same idea as the guest cart merge, one key instead of a table.
+        try { localStorage.setItem(App.CONST.LS_KEYS.GUEST_FULFILMENT, local.guestOrder.fulfilment); } catch (e) {}
+        App.Modal.close();
+        App.render();
+        setTimeout(scrollToDiscoverShops, 50);
+        return;
+      }
+      case 'guest-order-change':
+        return startOrderFlow();
+      case 'open-store': {
+        S.setRoute({ view: 'store', params: { storeId: ds.id } });
+        App.forceScrollTop();
+        return;
+      }
       case 'toggle-favorite-store':
         return S.toggleFavoriteStore(ds.id);
       case 'shop-open-menu':
@@ -951,6 +1399,9 @@ App.Pages.Home = (function () {
         if (store) storeInfoModal(store);
         return;
       }
+      case 'marketplace-view-all':
+        local.showAllShops = true;
+        return App.render();
       case 'marketplace-category':
         local.category = ds.category;
         return App.render();
@@ -983,10 +1434,15 @@ App.Pages.Home = (function () {
       // was never wired up for guests before this page's redesign
       // either) fixed here since "product details/customization" is
       // exactly what this page must keep working for every visitor.
+      // The popup's own buttons (+/-, Add to Cart, heart) must be forwarded
+      // too — without them a logged-out visitor could open the popup but
+      // nothing inside it did anything.
       case 'open-food':
-        return App.Pages.Customer.handleAction('open-food', ds);
       case 'view-food-image':
-        return App.Pages.Customer.handleAction('view-food-image', ds);
+      case 'detail-qty':
+      case 'add-to-cart-detail':
+      case 'toggle-favorite':
+        return App.Pages.Customer.handleAction(action, ds);
       case 'shop-goto-category': {
         const el = document.getElementById(`shop-sec-${ds.navIndex}`);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1017,14 +1473,39 @@ App.Pages.Home = (function () {
     }
   }
 
+  // The marketing home page now renders a lot more per keystroke than
+  // it used to (multiple horizontal carousels, 30+ icons re-run through
+  // lucide.createIcons() on every full re-render) — re-rendering the
+  // whole page on every single keystroke was measurably slow enough to
+  // feel like dropped/delayed characters while typing. local.search
+  // itself still updates immediately (nothing about the actual filter
+  // logic changes); only the expensive App.render() is debounced, so
+  // the results below settle ~180ms after typing pauses instead of
+  // fighting to keep up with every keystroke. The input's own visible
+  // text is native browser behavior and was never actually the slow
+  // part — this only speeds up the re-render, it can't "unblur" typing
+  // that was never blurred by CSS.
+  const debouncedRender = App.Utils.debounce(() => App.render(), 180);
+
   function handleInput(kind, value, ds) {
-    if (kind === 'marketplace-search') { local.search = value; App.render(); }
-    if (kind === 'store-search') { local.storeSearch[ds.storeId] = value; App.render(); }
+    if (kind === 'marketplace-search') { local.search = value; debouncedRender(); }
+    if (kind === 'store-search') { local.storeSearch[ds.storeId] = value; debouncedRender(); }
+    if (kind === 'update-instructions') return App.Pages.Customer.handleInput(kind, value, ds); // food popup
   }
 
   function handleChange(kind, ds, value) {
+    if (kind === 'toggle-extra') return App.Pages.Customer.handleChange(kind, ds, value); // food popup
     if (kind === 'marketplace-location') { local.location = value; App.render(); }
     if (kind === 'marketplace-sort') { local.sort = value; App.render(); }
+    if (kind === 'guest-order-university') {
+      local.guestOrderDraft.university = value;
+      local.guestOrderDraft.campus = null;
+      return App.Modal.open(guestOrderStep2Html());
+    }
+    if (kind === 'guest-order-campus') {
+      local.guestOrderDraft.campus = value;
+      return App.Modal.open(guestOrderStep2Html());
+    }
   }
 
   return {

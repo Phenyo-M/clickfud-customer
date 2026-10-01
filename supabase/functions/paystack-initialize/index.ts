@@ -16,7 +16,7 @@
 // SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are
 // provided automatically by the Supabase Edge Runtime.
 // ============================================================
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -37,6 +37,15 @@ function json(body: unknown, status = 200) {
 
 function round2(n: number) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+// Best-effort audit trail (payment_events) — never blocks or fails the
+// actual payment flow if logging itself has a problem, and never logs
+// anything beyond safe metadata (reference/status/reason), never card data.
+async function logEvent(admin: SupabaseClient, row: {
+  event_type: string; reference?: string | null; customer_id?: string | null; status?: string | null; failure_reason?: string | null;
+}) {
+  try { await admin.from("payment_events").insert({ source: "paystack-initialize", ...row }); } catch (_e) { /* never fail the payment over a logging error */ }
 }
 
 interface ExtraSelectionInput {
@@ -83,7 +92,7 @@ Deno.serve(async (req) => {
     if (!profile) return json({ error: "Profile not found." }, 404);
 
     // ---- Re-price every group server-side from live tables ----
-    const priced: Array<{ storeId: string; items: unknown[]; subtotal: number; deliveryLocation: unknown }> = [];
+    const priced: Array<{ storeId: string; items: unknown[]; subtotal: number; platformFee: number; deliveryLocation: unknown }> = [];
     let combinedSubtotal = 0;
 
     for (const group of groups) {
@@ -107,6 +116,7 @@ Deno.serve(async (req) => {
 
       const outItems: any[] = [];
       let groupSubtotal = 0;
+      let groupPlatformFee = 0;
 
       for (const it of group.items) {
         const qty = Math.max(1, Math.round(Number(it.qty) || 1));
@@ -134,47 +144,69 @@ Deno.serve(async (req) => {
             addonsTotal += extraPrice;
             outAddons.push({ id: match.extra_id, name: match.name, price: extraPrice });
           }
-          const price = round2(Number(menuItem.price) + addonsTotal);
+          // Customer-facing price includes the developer's own per-item
+          // platform fee (set at menu approval — see enforce_menu_item_status
+          // / menu-review.js) — one combined price, same as the shop's own
+          // price plus extras. The fee itself is tracked separately below so
+          // the split (platform vs. shop subaccount) can be computed from it
+          // directly, replacing the old percentage-of-total commission.
+          const platformFeeUnit = round2(Number(menuItem.platform_fee_amount || 0));
+          const price = round2(Number(menuItem.price) + platformFeeUnit + addonsTotal);
           outItems.push({
             menuItemId: menuItem.id, name: menuItem.name, price, qty,
             image: menuItem.image, addons: outAddons,
             specialInstructions: String(it.specialInstructions || "").slice(0, 200), isAddon: false,
           });
           groupSubtotal += price * qty;
+          groupPlatformFee += platformFeeUnit * qty;
         }
       }
 
       groupSubtotal = round2(groupSubtotal);
+      groupPlatformFee = round2(groupPlatformFee);
       combinedSubtotal = round2(combinedSubtotal + groupSubtotal);
-      priced.push({ storeId: group.storeId, items: outItems, subtotal: groupSubtotal, deliveryLocation: group.deliveryLocation || {} });
+      priced.push({ storeId: group.storeId, items: outItems, subtotal: groupSubtotal, platformFee: groupPlatformFee, deliveryLocation: group.deliveryLocation || {} });
     }
 
     // ---- Promo code (server-authoritative, against the real table) ----
     let combinedDiscount = 0;
     let appliedPromoCode: string | null = null;
+    // What the discount is worked out on, per shop: a product code only
+    // counts its chosen products' lines (price incl. extras + platform fee, x qty);
+    // a legacy code with no product counts the whole order. Same rule as
+    // validate_order_pricing (SQL) and js/promotions.js.
+    let eligibleByGroup: number[] = priced.map(() => 0);
     if (promoCode) {
       const { data: promo } = await admin.from("promotions").select("*").eq("code", String(promoCode).toUpperCase()).maybeSingle();
       const now = new Date();
       if (promo && promo.active
           && (!promo.expires_at || new Date(promo.expires_at) > now)
           && (!promo.usage_limit || (promo.used_count || 0) < promo.usage_limit)) {
-        combinedDiscount = promo.type === "percentage"
-          ? round2(combinedSubtotal * (Number(promo.value) / 100))
-          : Math.min(Number(promo.value), combinedSubtotal);
-        appliedPromoCode = promo.code;
+        const productIds: string[] = Array.isArray(promo.menu_item_ids) ? promo.menu_item_ids : [];
+        eligibleByGroup = priced.map((g) => round2((g.items as any[]).reduce((s, it) =>
+          (!productIds.length || (!it.isAddon && productIds.includes(it.menuItemId))) ? s + Number(it.price) * Number(it.qty) : s, 0)));
+        const eligible = round2(eligibleByGroup.reduce((a, b) => a + b, 0));
+        if (eligible > 0) {
+          combinedDiscount = promo.type === "percentage"
+            ? round2(eligible * (Number(promo.value) / 100))
+            : Math.min(Number(promo.value), eligible);
+          appliedPromoCode = promo.code;
+        }
       }
     }
 
     // Allocate the combined discount proportionally by each store's share
     // of the combined subtotal — same algorithm the client uses when
     // splitting a COD multi-shop checkout, kept consistent here.
+    const eligibleAll = eligibleByGroup.reduce((a, b) => a + b, 0);
+    const lastEligible = eligibleByGroup.map((e) => e > 0).lastIndexOf(true);
     let discountLeft = combinedDiscount;
     const preSplitGroups = priced.map((g, i) => {
-      const isLast = i === priced.length - 1;
-      const share = isLast ? discountLeft : (combinedSubtotal > 0 ? round2(combinedDiscount * (g.subtotal / combinedSubtotal)) : 0);
-      if (!isLast) discountLeft = round2(discountLeft - share);
+      const share = !combinedDiscount || !eligibleByGroup[i] ? 0
+        : (i === lastEligible ? discountLeft : round2(combinedDiscount * (eligibleByGroup[i] / eligibleAll)));
+      if (i !== lastEligible) discountLeft = round2(discountLeft - share);
       return {
-        storeId: g.storeId, items: g.items, subtotal: g.subtotal,
+        storeId: g.storeId, items: g.items, subtotal: g.subtotal, platformFee: g.platformFee,
         discount: share, total: round2(Math.max(0, g.subtotal - share)),
         promoCode: share > 0 ? appliedPromoCode : null,
         deliveryLocation: g.deliveryLocation,
@@ -189,12 +221,10 @@ Deno.serve(async (req) => {
     // legitimate to go — checkout is refused outright rather than ever
     // silently reassigning one shop's money to another or to the platform. ----
     const storeIds = preSplitGroups.map((g) => g.storeId);
-    const [{ data: payoutAccounts }, { data: storeRows }, { data: platformConfig }] = await Promise.all([
+    const [{ data: payoutAccounts }, { data: storeRows }] = await Promise.all([
       admin.from("store_payout_accounts").select("store_id,status,paystack_subaccount_code").in("store_id", storeIds),
-      admin.from("stores").select("id,name,commission_percent").in("id", storeIds),
-      admin.from("platform_config").select("commission_percent").eq("id", 1).single(),
+      admin.from("stores").select("id,name").in("id", storeIds),
     ]);
-    const defaultCommission = Number(platformConfig?.commission_percent) || 0;
 
     for (const storeId of storeIds) {
       const account = (payoutAccounts || []).find((a) => a.store_id === storeId);
@@ -205,14 +235,16 @@ Deno.serve(async (req) => {
     }
 
     // ---- Split each group's total between the shop's subaccount and the
-    // platform, per that shop's own commission override (falling back to
-    // the platform default) — never a number invented per-checkout. ----
+    // platform. The platform's share is the sum of the developer's own
+    // per-item fees (set at menu approval), NOT a percentage of the total —
+    // replaces the old commission_percent-based split. Capped at the
+    // group's actual (post-discount) total so a promo discount is always
+    // absorbed by the shop's own share first, never pushed into a negative
+    // shop payout; the platform's fee only shrinks if a discount is large
+    // enough to eat into it. ----
     const finalGroups = preSplitGroups.map((g) => {
       const account = (payoutAccounts || []).find((a) => a.store_id === g.storeId)!;
-      const storeRow = (storeRows || []).find((s) => s.id === g.storeId);
-      const commissionPct = storeRow?.commission_percent !== null && storeRow?.commission_percent !== undefined
-        ? Number(storeRow.commission_percent) : defaultCommission;
-      const platformFeeAmount = round2(g.total * (commissionPct / 100));
+      const platformFeeAmount = round2(Math.min(g.platformFee, g.total));
       const shopAmount = round2(Math.max(0, g.total - platformFeeAmount));
       return { ...g, subaccountCode: account.paystack_subaccount_code, shopAmount, platformFeeAmount };
     });
@@ -264,7 +296,9 @@ Deno.serve(async (req) => {
       });
       const splitData = await splitRes.json();
       if (!splitRes.ok || !splitData.status) {
-        await admin.from("checkout_sessions").update({ status: "failed" }).eq("reference", reference);
+        const reason = splitData?.message || "split_setup_failed";
+        await admin.from("checkout_sessions").update({ status: "failed", failure_reason: reason }).eq("reference", reference);
+        await logEvent(admin, { event_type: "initialize_failed", reference, customer_id: user.id, status: "failed", failure_reason: reason });
         return json({ error: splitData?.message || "Unable to set up payment split for this order." }, 502);
       }
       splitCode = splitData.data.split_code;
@@ -285,12 +319,16 @@ Deno.serve(async (req) => {
     });
     const paystackData = await paystackRes.json();
     if (!paystackRes.ok || !paystackData.status) {
-      await admin.from("checkout_sessions").update({ status: "failed" }).eq("reference", reference);
+      const reason = paystackData?.message || "initialize_api_failed";
+      await admin.from("checkout_sessions").update({ status: "failed", failure_reason: reason }).eq("reference", reference);
+      await logEvent(admin, { event_type: "initialize_failed", reference, customer_id: user.id, status: "failed", failure_reason: reason });
       return json({ error: paystackData?.message || "Unable to start payment with Paystack." }, 502);
     }
 
+    await logEvent(admin, { event_type: "initialize_success", reference, customer_id: user.id, status: "pending" });
     return json({ authorization_url: paystackData.data.authorization_url, reference });
   } catch (e) {
+    console.error(e);
     return json({ error: "Something went wrong starting payment. Please try again." }, 500);
   }
 });

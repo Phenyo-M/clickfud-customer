@@ -2,7 +2,7 @@
    CLICKFUD — dashboard-specific layout rules
    ============================================================ */
 
-.page-wrap { max-width: 1180px; margin: 0 auto; padding: 22px 20px 48px; }
+.page-wrap { --content-pad-x: 20px; max-width: 1180px; margin: 0 auto; padding: 22px 20px 48px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
 
 /* ---------- Sub-navigation tabs (manager / cashier sections) ---------- */
@@ -59,7 +59,7 @@
 .food-detail-img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 .food-meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .qty-stepper { display: flex; align-items: center; gap: 14px; background: var(--bg-surface-2); border-radius: var(--radius-pill); padding: 6px 8px; width: fit-content; }
-.qty-stepper .qty-val { font-weight: 800; min-width: 24px; text-align: center; }
+.qty-stepper .qty-val { font-weight: 700; min-width: 24px; text-align: center; }
 
 /* ---------- Checkout ---------- */
 .checkout-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; align-items: start; }
@@ -86,7 +86,7 @@
 
 /* ---------- Profile ---------- */
 .profile-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
-.profile-avatar-lg { width: 76px; height: 76px; border-radius: 50%; background: var(--color-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 26px; overflow: hidden; }
+.profile-avatar-lg { width: 76px; height: 76px; border-radius: 50%; background: var(--color-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 26px; overflow: hidden; }
 .profile-avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
 
 /* ---------- Kanban ticket extras already in components.css ---------- */
@@ -116,6 +116,6 @@
 :root[data-theme="dark"] .day-toggle.open { color: #4ade80; }
 
 @media (max-width: 620px) {
-  .page-wrap { padding: 16px 14px 40px; }
+  .page-wrap { --content-pad-x: 14px; padding: 16px 14px 40px; }
   .checkout-grid, .split-layout { gap: 14px; }
 }
