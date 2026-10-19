@@ -1,0 +1,175 @@
+{
+ "guest_open": [
+  {
+   "method": "GET",
+   "path": "/rest/v1/stores?select=id%2Cname%2Cdescription%2Ccategory%2Clogo_url%2Ccover_image_url%2Ccontact_phone%2Ccontact_email%2Ccampus_location%2Caddress%2Caccepts_delivery%2Caccepts_collection%2Cdelivery_fee%2Cprep_time_min%2Cprep_time_max%2Crating%2Crating_count%2Copening_time%2Cclosing_time%2Cclosed_days%2Cstore_closed%2Cclosure_reason%2Cstatus%2Crejection_reason%2Cuniversity%2Cis_published%2Crating_breakdown%2Cweekly_hours%2Cbusy%2Cbusy_extra_minutes%2Cclosure_category%2Cverified%2Catmosphere_tags%2Cseller_kind%2Cpickup_lat%2Cpickup_lng%2Ctest_mode&order=name.asc",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/allowed_domains?select=institution_name%2Cdomain%2Cstudent_number_digits%2Cstudent_number_prefix&active=eq.true&order=institution_name.asc",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/store_promotions?select=*&order=priority.desc",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/home_page_media?select=slot%2Cimage_url%2Ctitle%2Csubtitle",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/menu_items?select=id%2Cname%2Ccategory%2Cprice%2Cplatform_fee_amount%2Cimage%2Cdescription%2Cingredients%2Callergens%2Cpreparation_time%2Cavailable%2Cstock%2Clow_stock_threshold%2Crating%2Crating_count%2Cstore_id%2Cstatus%2Cavailability_windows&order=created_at.asc",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/menu_item_extras_public?select=*",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/menu_addons?select=*&order=created_at.asc",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/delivery_zones?select=*&order=name.asc",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/promotions?select=*&order=created_at.desc",
+   "body": null,
+   "auth": "anon",
+   "prefer": null
+  }
+ ],
+ "student_open": [
+  {
+   "method": "GET",
+   "path": "/rest/v1/profiles?select=*&id=eq.{{UID}}",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/stores?select=id%2Cname%2Cdescription%2Ccategory%2Clogo_url%2Ccover_image_url%2Ccontact_phone%2Ccontact_email%2Ccampus_location%2Caddress%2Caccepts_delivery%2Caccepts_collection%2Cdelivery_fee%2Cprep_time_min%2Cprep_time_max%2Crating%2Crating_count%2Copening_time%2Cclosing_time%2Cclosed_days%2Cstore_closed%2Cclosure_reason%2Cstatus%2Crejection_reason%2Cuniversity%2Cis_published%2Crating_breakdown%2Cweekly_hours%2Cbusy%2Cbusy_extra_minutes%2Cclosure_category%2Cverified%2Catmosphere_tags%2Cseller_kind%2Cpickup_lat%2Cpickup_lng%2Ctest_mode&order=name.asc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/allowed_domains?select=institution_name%2Cdomain%2Cstudent_number_digits%2Cstudent_number_prefix&active=eq.true&order=institution_name.asc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/store_promotions?select=*&order=priority.desc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/home_page_media?select=slot%2Cimage_url%2Ctitle%2Csubtitle",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/menu_items?select=id%2Cname%2Ccategory%2Cprice%2Cplatform_fee_amount%2Cimage%2Cdescription%2Cingredients%2Callergens%2Cpreparation_time%2Cavailable%2Cstock%2Clow_stock_threshold%2Crating%2Crating_count%2Cstore_id%2Cstatus%2Cavailability_windows&order=created_at.asc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/menu_item_extras_public?select=*",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/menu_addons?select=*&order=created_at.asc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/delivery_zones?select=*&order=name.asc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/promotions?select=*&order=created_at.desc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/orders?select=*&customer_id=eq.{{UID}}&order=created_at.desc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/notifications?select=*&user_id=eq.{{UID}}&order=created_at.desc&limit=50",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/notification_preferences?select=channel%2Cevent_type%2Cenabled&user_id=eq.{{UID}}&event_type=eq.*",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/reviews?select=*&customer_id=eq.{{UID}}&order=created_at.desc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  },
+  {
+   "method": "GET",
+   "path": "/rest/v1/timetable_entries?select=*&order=day_of_week.asc%2Cstart_time.asc",
+   "body": null,
+   "auth": "user",
+   "prefer": null
+  }
+ ],
+ "student_orders": []
+}

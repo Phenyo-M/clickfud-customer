@@ -1,0 +1,331 @@
+/* ============================================================
+   CLICKFOOD — BASE STYLES: reset, tokens, typography, buttons, forms, cards, badges, skeletons
+   ============================================================ */
+
+:root {
+  /* Brand: cream background, warm dark brown text, orange-red primary,
+     forest green accent. Display type is Bricolage Grotesque, body DM Sans. */
+  --color-primary: #E04A1F;
+  --color-primary-rgb: 224,74,31;
+  --color-primary-dark: #C23D16;
+  --color-primary-light: #F2A58C;
+  --color-green: #1B4D2E;
+  --color-charcoal: #2A1A14;
+  --color-offwhite: #F8F3EA;
+  --color-yellow: #F2B33D;
+  --color-success: #23864B;
+  --color-error: #D83A2E;
+  --color-gray: #6E6058;
+
+  --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: "Bricolage Grotesque", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --bg-body: var(--color-offwhite);
+  --bg-surface: #FFFCF7;
+  --bg-surface-2: #F1EADF;
+  --bg-elevated: #FFFFFF;
+  --text-primary: #2A1A14;
+  --text-secondary: #6E6058;
+  --text-inverse: #FFFFFF;
+  --text-accent: var(--color-green);
+  --border-color: #EADFD1;
+  --border-strong: #DACBB8;
+  --shadow-sm: 0 1px 2px rgba(42,26,20,0.06);
+  --shadow-md: 0 6px 18px rgba(42,26,20,0.08);
+  --shadow-lg: 0 14px 36px rgba(42,26,20,0.14);
+  --overlay: rgba(28,18,14,0.5);
+  --media-bg: #EFE6D9;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --nav-h: 64px;
+  --bottomnav-h: 64px;
+  --sidebar-w: 220px;
+
+  --transition-fast: 140ms ease;
+  --transition-med: 220ms ease;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-primary: #F0603A;
+  --color-primary-rgb: 240,96,58;
+  --color-primary-dark: #E04A1F;
+  --bg-body: #16110E;
+  --bg-surface: #201915;
+  --bg-surface-2: #2A221D;
+  --bg-elevated: #2F2621;
+  --text-primary: #F6EFE6;
+  --text-secondary: #B5A89C;
+  --text-inverse: #2A1A14;
+  --text-accent: #7CC49A;
+  --border-color: #3A2F28;
+  --border-strong: #4A3D34;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 14px rgba(0,0,0,0.35);
+  --shadow-lg: 0 16px 40px rgba(0,0,0,0.5);
+  --overlay: rgba(0,0,0,0.65);
+  --media-bg: #2A221D;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-primary: #F0603A;
+    --color-primary-rgb: 240,96,58;
+    --color-primary-dark: #E04A1F;
+    --bg-body: #16110E;
+    --bg-surface: #201915;
+    --bg-surface-2: #2A221D;
+    --bg-elevated: #2F2621;
+    --text-primary: #F6EFE6;
+    --text-secondary: #B5A89C;
+    --text-inverse: #2A1A14;
+    --text-accent: #7CC49A;
+    --border-color: #3A2F28;
+    --border-strong: #4A3D34;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 14px rgba(0,0,0,0.35);
+    --shadow-lg: 0 16px 40px rgba(0,0,0,0.5);
+    --overlay: rgba(0,0,0,0.65);
+    --media-bg: #2A221D;
+  }
+}
+
+* , *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+/* "manipulation" is the standard value for exactly this: it disables the
+   pinch-zoom and double-tap-zoom gestures while leaving normal one-finger
+   panning/scrolling (vertical AND horizontal, e.g. the food-category and
+   store-promo rows) and ordinary taps completely untouched — unlike
+   touch-action:none, it never blocks scroll. Backs up the viewport meta
+   tag's user-scalable=no/maximum-scale=1, which some mobile browsers
+   don't fully honor for double-tap zoom on their own. */
+html, body { touch-action: manipulation; }
+/* Safety net for the homepage's full-bleed curved container (css/home.css
+   .storefront-topbar/.storefront-curved), which intentionally breaks out
+   to 100vw from inside a padded/centered ancestor — 100vw can exceed the
+   real visible width by a scrollbar's worth of pixels in some browsers,
+   which would otherwise show as a few pixels of horizontal scroll. */
+html, body { overflow-x: hidden; }
+body {
+  margin: 0;
+  background: var(--bg-body);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--transition-med), color var(--transition-med);
+  padding-top: var(--nav-h);
+}
+/* Not on body: with html/body pinned to height:100%, a border-box body's own bottom padding doesn't extend real scroll height (confirmed quirk) — #app has no fixed height, so it does. */
+#app { padding-bottom: var(--fixed-bottom-space, 0px); }
+/* Public homepage supplies its own (sticky, in-flow) header instead of the
+   fixed .app-nav, so no reserved top padding is needed for it. */
+body.no-app-nav { padding-top: 0; }
+
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+button { font-family: inherit; }
+h1,h2,h3,h4,p { margin: 0; }
+ul { margin: 0; padding: 0; list-style: none; }
+
+/* focus visibility for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Layout helpers ---------- */
+.container { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+.grid { display: grid; gap: 16px; }
+.grid-menu { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.flex { display: flex; }
+.flex-col { display: flex; flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: 4px; } .gap-2 { gap: 8px; } .gap-3 { gap: 12px; } .gap-4 { gap: 16px; }
+.mt-1{margin-top:4px;} .mt-2{margin-top:8px;} .mt-3{margin-top:12px;} .mt-4{margin-top:16px;} .mt-6{margin-top:24px;}
+.mb-1{margin-bottom:4px;} .mb-2{margin-bottom:8px;} .mb-3{margin-bottom:12px;} .mb-4{margin-bottom:16px;}
+.text-sm { font-size: 13px; } .text-xs{font-size:11px;} .text-lg{font-size:18px;} .text-xl{font-size:22px;}
+.text-muted { color: var(--text-secondary); }
+.text-primary-c { color: var(--color-primary); }
+
+/* Shown only until the first session check finishes (js/app.js
+   skeleton()). Same fixed cream as manifest.json's background_color, so
+   the installed app's own launch screen hands over with no colour flash.
+   No logo here: the launch screen already shows it. */
+.boot-screen {
+  position: fixed; inset: 0; height: 100vh; height: 100dvh; z-index: 5000;
+  background: #FDF3DF; display: flex; align-items: center; justify-content: center; padding: 40px 20px; text-align: center;
+}
+.boot-screen .text-muted { color: #6E6058; }
+.cf-logo-badge svg { display: block; }
+.text-success { color: var(--color-success); }
+.text-error { color: var(--color-error); }
+.font-bold { font-weight: 700; } .font-semibold { font-weight: 600; }
+.w-full { width: 100%; }
+.hidden { display: none !important; }
+.section-title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.divider { height: 1px; background: var(--border-color); border: none; margin: 16px 0; }
+
+/* ---------- Typography scale ---------- */
+.page-title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: none; cursor: pointer; font-weight: 600; font-size: 14px;
+  border-radius: var(--radius-md); padding: 12px 20px; min-height: 44px;
+  transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+  white-space: nowrap;
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--color-primary); color: #fff; box-shadow: var(--shadow-sm); }
+.btn-primary:hover:not(:disabled) { background: var(--color-primary-dark); box-shadow: var(--shadow-md); }
+.btn-secondary { background: var(--bg-surface-2); color: var(--text-primary); border: 1px solid var(--border-color); }
+.btn-secondary:hover:not(:disabled) { background: var(--border-color); }
+.btn-success { background: var(--color-success); color: #fff; }
+.btn-danger { background: var(--color-error); color: #fff; }
+.btn-ghost { background: transparent; color: var(--text-primary); }
+.btn-ghost:hover { background: var(--bg-surface-2); }
+.btn-sm { padding: 8px 14px; min-height: 34px; font-size: 13px; border-radius: var(--radius-sm); }
+.btn-lg { padding: 15px 26px; font-size: 16px; }
+.btn-block { width: 100%; }
+.btn-icon { padding: 10px; min-width: 40px; min-height: 40px; border-radius: var(--radius-pill); background: var(--bg-surface-2); color: var(--text-primary); border: 1px solid var(--border-color); }
+.btn-icon:hover { background: var(--border-color); }
+.btn-loading { position: relative; color: transparent !important; pointer-events: none; }
+.btn-loading::after {
+  content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.5); border-top-color: #fff; animation: spin 0.7s linear infinite;
+}
+.btn-secondary.btn-loading::after, .btn-ghost.btn-loading::after, .btn-google.btn-loading::after { border-color: rgba(30,30,36,0.25); border-top-color: #1f1f1f; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Forms ---------- */
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.field label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.input, .select, textarea.input {
+  width: 100%; padding: 12px 14px; border-radius: var(--radius-sm); border: 1.5px solid var(--border-color);
+  background: var(--bg-surface); color: var(--text-primary); font-size: 14px; min-height: 44px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.input:focus, .select:focus, textarea.input:focus {
+  border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb),0.15); outline: none;
+}
+.input.has-error { border-color: var(--color-error); }
+.field-error { font-size: 12px; color: var(--color-error); }
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.input-group { display: flex; align-items: center; border: 1.5px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface); padding: 0 12px; }
+.input-group input { border: none; background: transparent; min-height: 44px; flex: 1; }
+.input-group input:focus { outline: none; box-shadow: none; }
+.input-group-btn { background: none; border: none; padding: 6px; margin: 0 -4px 0 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); flex-shrink: 0; }
+.input-group-btn:hover { color: var(--text-primary); }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--bg-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color); transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+.card-pad { padding: 18px; }
+.card-hover:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.card-hover:active { transform: scale(0.98); }
+
+/* ---------- Image fade-in (lazy-loaded photos) ---------- */
+.fade-img { opacity: 0; transition: opacity 280ms ease; }
+.fade-img.loaded { opacity: 1; }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700;
+  padding: 4px 10px; border-radius: var(--radius-pill); text-transform: uppercase; letter-spacing: 0.03em;
+}
+.badge-primary { background: rgba(var(--color-primary-rgb),0.14); color: var(--color-primary-dark); }
+.badge-yellow { background: rgba(255,193,7,0.22); color: #8a6400; }
+.badge-success { background: rgba(34,197,94,0.15); color: #157a41; }
+.badge-error { background: rgba(239,68,68,0.14); color: #b91c1c; }
+.badge-gray { background: var(--bg-surface-2); color: var(--text-secondary); border: 1px solid var(--border-color); }
+:root[data-theme="dark"] .badge-yellow { color: #FFC107; }
+:root[data-theme="dark"] .badge-success { color: #4ade80; }
+:root[data-theme="dark"] .badge-error { color: #f87171; }
+
+/* ---------- Skeletons ---------- */
+.skeleton { background: linear-gradient(90deg, var(--bg-surface-2) 25%, var(--border-color) 37%, var(--bg-surface-2) 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius: var(--radius-sm); }
+@keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+/* ---------- Empty states ---------- */
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 20px; color: var(--text-secondary); gap: 10px; }
+.empty-state .icon-wrap { width: 64px; height: 64px; border-radius: 50%; background: var(--bg-surface-2); display: flex; align-items: center; justify-content: center; color: var(--color-primary); margin-bottom: 6px; }
+.empty-state h3 { color: var(--text-primary); font-size: 16px; }
+
+/* ---------- Scrollbars (light touch on desktop; fully hidden on touch/mobile) ----------
+   This app is mobile-first (see css/components.css .bottom-nav etc.), and
+   a visible scrollbar thumb reads as a desktop-web artifact there, not
+   part of the native app feel — hidden wherever the primary input is
+   touch (hover:none/pointer:coarse covers real phones/tablets, unlike a
+   width media query, which a touch-enabled 2-in-1 laptop would still
+   fail). Scrolling itself is completely unaffected either way — these
+   properties only ever hide the browser's own scrollbar chrome, never
+   the ability to scroll. The light desktop scrollbar below is left
+   exactly as it was for mouse/trackpad users. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+@media (hover: none), (pointer: coarse) {
+  * { scrollbar-width: none; -ms-overflow-style: none; }
+  ::-webkit-scrollbar { display: none; width: 0; height: 0; }
+}
+
+/* Utility for icon sizing via lucide */
+[data-lucide] { width: 1em; height: 1em; }
+svg.lucide { display: inline-block; vertical-align: -2px; }
+
+/* ---------- Typography ----------
+   Headings, shop and food names use the display face; everything else
+   (body, inputs, buttons) uses the body face. */
+input, select, textarea { font-family: inherit; }
+h1, h2, h3, h4,
+.page-title, .section-title, .modal-title, .msection-title, .msection-title-sm, .shop-section-title,
+.hero-title, .mhero-title, .mhero-title-lg, .mhow-title, .mfeature-title, .onboarding-headline, .campus-setup-title,
+.brand, .home-brand, .store-card-name, .store-mini-name, .mshop-card-name, .shop-info-name, .shop-prod-name,
+.menu-card-name, .hot-name, .deal-title, .promo-mini-title, .kanban-col-title, .stat-value, .empty-state h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.015em;
+}
+h1, .page-title, .hero-title, .mhero-title, .mhero-title-lg, .onboarding-headline { font-weight: 800; letter-spacing: -0.025em; line-height: 1.08; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-primary); }
+.text-accent { color: var(--text-accent); }
+
+/* ---------- Image boxes (js/media.js) ----------
+   Each .media box has its own aspect-ratio (per context), so the layout
+   never jumps while photos load. Default: the photo fills the box. When
+   media.js finds the photo's shape is far from the box's, it adds
+   .media--fit: the whole photo is shown on a blurred copy of itself
+   instead of empty bars or a heavy zoom. */
+.media { position: relative; overflow: hidden; background: var(--media-bg); isolation: isolate; }
+.media > img, .media > video { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.media.media--fit::before {
+  content: ''; position: absolute; inset: -30px; z-index: -1;
+  background: var(--media-src) center / cover no-repeat;
+  filter: blur(24px) saturate(1.15); opacity: 0.9;
+}
+.media.media--fit > img, .media.media--fit > video { object-fit: contain; }
+.media > img.img-fallback { object-fit: scale-down !important; }
+/* photo inside a card: fixed box, whole photo, plain background (js/media.js) */
+.media.media--contain > img, .media.media--contain > video { object-fit: contain; }
+/* seller logos: the whole logo always shows, on white (shop logos: css/home.css) */
+.media.seller-logo > img, .media.seller-detail-logo > img { object-fit: contain; background: #fff; padding: 2px; box-sizing: border-box; }
+
+/* Text boxes (2026-10-18): no resize handle in the corner (it could break
+   layouts); long text scrolls inside the box. */
+textarea, textarea.input { resize: none; overflow-y: auto; max-height: 50vh; line-height: 1.45; }

@@ -1,0 +1,16 @@
+{
+  "redirects": [
+    {
+      "source": "/",
+      "has": [{ "type": "host", "value": "clickfud-customer.vercel.app" }],
+      "destination": "https://clickfood.co.za/",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "clickfud-customer.vercel.app" }],
+      "destination": "https://clickfood.co.za/:path*",
+      "permanent": false
+    }
+  ]
+}

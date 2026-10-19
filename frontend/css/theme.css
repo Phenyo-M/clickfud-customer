@@ -1,0 +1,99 @@
+/* ============================================================
+   CLICKFOOD — visual style, shared by the customer, staff and
+   developer apps (same file in each). Loaded last.
+   Cream background, warm brown text, orange-red actions, forest
+   green accents, Bricolage Grotesque headings, DM Sans body.
+   ============================================================ */
+
+/* ---------- Headings ---------- */
+.page-title { font-size: clamp(26px, 3.4vw, 36px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; }
+.section-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+.page-header { margin-bottom: 22px; }
+.page-header .section-title, .page-header h2 { font-size: 24px !important; font-weight: 800; }
+.card h3, .card .font-bold:first-child { letter-spacing: -0.01em; }
+
+/* ---------- Buttons: pills, like the reference ---------- */
+.btn, .btn-sm, .btn-lg { border-radius: var(--radius-pill); font-weight: 700; }
+.btn-secondary { background: var(--bg-surface); border: 1px solid var(--border-strong); }
+.btn-secondary:hover:not(:disabled) { background: var(--bg-surface-2); }
+.btn-primary { box-shadow: 0 6px 16px rgba(var(--color-primary-rgb), 0.22); }
+
+/* ---------- Cards ---------- */
+.card { border-radius: 20px; box-shadow: 0 1px 2px rgba(42,26,20,0.04), 0 10px 26px rgba(42,26,20,0.05); }
+.card-pad { padding: 20px; }
+.modal { border-radius: 24px; }
+
+/* ---------- Forms ---------- */
+.input, .select, textarea.input { border-radius: 12px; border-color: var(--border-strong); }
+.field label { color: var(--text-primary); }
+
+/* ---------- Badges: calm pills, no shouting caps ---------- */
+.badge { text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 12px; }
+
+/* ---------- Tabs: pill switcher instead of underlines ---------- */
+.tab-row { border-bottom: none; gap: 8px; padding-bottom: 2px; }
+.tab-btn {
+  border: 1px solid var(--border-color) !important; border-radius: var(--radius-pill); margin-bottom: 0;
+  background: var(--bg-surface); color: var(--text-secondary); padding: 8px 16px;
+}
+.tab-btn.active { background: var(--text-primary); color: var(--bg-body); border-color: var(--text-primary) !important; }
+.tab-btn:hover:not(.active) { background: var(--bg-surface-2); }
+
+/* ---------- Chips ---------- */
+.chip { background: var(--bg-surface); border-color: var(--border-strong); }
+.chip.active { background: var(--text-primary); color: var(--bg-body); border-color: var(--text-primary); }
+
+/* ---------- Side menus ---------- */
+.sidebar, .dev-sidebar { background: var(--bg-body); }
+.sidebar-item.active, .dev-sidebar-item.active { background: rgba(var(--color-primary-rgb), 0.12); color: var(--color-primary); }
+.dev-sidebar-label { letter-spacing: 0.1em; font-weight: 700; padding-top: 18px; }
+
+/* ---------- Stats ---------- */
+.stat-tile .stat-value { font-family: var(--font-display); font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+.stat-tile .stat-icon { border-radius: 12px; }
+
+/* ---------- Tables ---------- */
+.table-wrap { border-radius: 16px; background: var(--bg-surface); }
+table.data-table th { background: var(--bg-surface-2); text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+
+/* ---------- Empty states ---------- */
+.empty-state h3 { font-size: 18px; font-weight: 800; }
+
+/* ---------- Page intro (customer home), from the reference ---------- */
+.cf-intro { margin: 4px 0 18px; }
+.cf-intro .eyebrow { display: block; margin-bottom: 6px; }
+.cf-intro-title { font-family: var(--font-display); font-size: clamp(30px, 6vw, 52px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.02; margin: 0; }
+.cf-intro-title span { color: var(--text-accent); }
+
+/* The developer sidebar already lists every page on wider screens. */
+@media (min-width: 761px) { .dev-tab-row { display: none; } }
+
+/* New ClickFood logo has a cream square background: round it off everywhere. */
+.brand-icon, .cf-logo-badge { overflow: hidden; border-radius: 10px; background: #FDF3DF; }
+img[src*="clickfood-logo"] { border-radius: 22px; }
+
+/* ---------- Back arrow + page title (js/nav.js pageHead) ---------- */
+.page-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; min-width: 0; }
+.page-head .page-title { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.page-head-right { margin-left: auto; flex-shrink: 0; }
+.page-back {
+  width: 44px; height: 44px; min-width: 44px; flex-shrink: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.08));
+}
+.page-back:hover { background: var(--bg-surface-2); }
+.page-back:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.page-back svg { width: 20px; height: 20px; }
+.page-back.solo { margin-bottom: 12px; }
+
+/* ---------- Privacy Policy / Terms inside the app (js/legal.js) ---------- */
+.legal-doc { line-height: 1.6; font-size: 15px; overflow-wrap: anywhere; }
+.legal-doc .effective-date { color: var(--text-muted); font-size: 13px; margin-bottom: 16px; }
+.legal-doc h2 { font-size: 18px; font-weight: 800; margin: 26px 0 10px; padding-top: 16px; border-top: 1px solid var(--border-color); }
+.legal-doc h3 { font-size: 15px; font-weight: 700; margin: 16px 0 6px; }
+.legal-doc p { margin: 0 0 12px; }
+.legal-doc ul { margin: 0 0 12px; padding-left: 20px; }
+.legal-doc li { margin-bottom: 6px; }
+.legal-doc .placeholder { color: var(--color-primary); font-weight: 600; }
+.legal-agree { position: sticky; bottom: 12px; margin-top: 16px; }

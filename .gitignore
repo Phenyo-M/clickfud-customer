@@ -7,7 +7,15 @@
 .claude
 
 # Supabase CLI local link/cache state (machine-specific, not app source)
-supabase/.temp
+backend/supabase/.temp
 
 # Supabase CLI cache created when the CLI is run from inside supabase/functions
-supabase/functions/supabase/
+backend/supabase/functions/supabase/
+backend/tests/security-check.sql
+
+# local test databases and tools
+backend/tests/lt/
+backend/tests/load/schema-export.json
+
+# Supabase CLI state accidentally created at the repo root
+supabase/.temp

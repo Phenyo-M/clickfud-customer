@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>ClickFood</title>
+<meta name="description" content="Order food from campus food shops, skip the queue, and collect your meal when it’s ready." />
+<link rel="icon" href="icons/clickfood-icon-192.png" type="image/png">
+<link rel="manifest" href="manifest.json" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="ClickFood" />
+<link rel="apple-touch-icon" href="icons/clickfood-icon-512.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" />
+<meta name="theme-color" content="#FDF3DF" />
+<link rel="stylesheet" href="css/base.css?v=20261018t" />
+<link rel="stylesheet" href="css/components.css?v=20261018t" />
+<link rel="stylesheet" href="css/dashboards.css?v=20261018t" />
+<link rel="stylesheet" href="css/home.css?v=20261017w" />
+<link rel="stylesheet" href="css/onboarding.css?v=20261011a" />
+<link rel="stylesheet" href="css/seller.css?v=20261018t" />
+<link rel="stylesheet" href="css/theme.css?v=20261017x" />
+</head>
+<body>
+
+<div id="app-nav-root"></div>
+<div id="sidebar-root"></div>
+
+<div id="offline-banner-root"></div>
+
+<main id="app" role="main"></main>
+
+<div id="mobile-nav-root"></div>
+<div id="cart-panel-root"></div>
+<div id="modal-root" aria-live="polite"></div>
+<div id="image-viewer-root"></div>
+<div id="toast-root" aria-live="polite" aria-atomic="true"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.462.0/dist/umd/lucide.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<!-- Cache-busting query string (?v=) — bump on every future deploy so
+     mobile browsers/PWAs never serve stale JS after an update. -->
+<script src="js/config.js?v=20261017z"></script>
+<script src="js/supabaseClient.js?v=20261004a"></script>
+<script src="js/monitor.js?v=20261016a"></script>
+<script src="js/captcha.js?v=20261017u"></script>
+<script src="js/institutions.js?v=20261015b"></script>
+<script src="js/utils.js?v=20261015b"></script>
+<script src="js/store.js?v=20261014a"></script>
+<script src="js/offline-cache.js?v=20261016u"></script>
+<script src="js/connectivity.js?v=20261004a"></script>
+<script src="js/media.js?v=20261017a"></script>
+<script src="js/upload.js?v=20261013c"></script>
+<script src="js/toast.js?v=20261017a"></script>
+<script src="js/search-clear.js?v=20261018a"></script>
+<script src="js/image-viewer.js?v=20261004a"></script>
+<script src="js/auth.js?v=20261017z"></script>
+<script src="js/notifications.js?v=20261018r"></script>
+<script src="js/stores.js?v=20261017w"></script>
+<script src="js/home-page-media.js?v=20261004a"></script>
+<script src="js/menu.js?v=20261004a"></script>
+<script src="js/item-extras.js?v=20261004a"></script>
+<script src="js/addons.js?v=20261004a"></script>
+<script src="js/push.js?v=20261013n"></script>
+<script src="js/settings.js?v=20261004a"></script>
+<script src="js/promotions.js?v=20261018q"></script>
+<script src="js/orders.js?v=20261013n"></script>
+<script src="js/payments.js?v=20261004a"></script>
+<script src="js/reviews.js?v=20261004a"></script>
+<script src="js/discovery.js?v=20261017r"></script>
+<script src="js/student-verify.js?v=20261018c"></script>
+<script src="js/legal.js?v=20261018a"></script>
+<script src="js/map-picker.js?v=20261018a"></script>
+<script src="js/seller.js?v=20261017x"></script>
+<script src="js/orientation-campuses.js?v=20261004a"></script>
+<script src="js/orientation-location.js?v=20261004a"></script>
+<script src="js/orientation-providers.js?v=20261004a"></script>
+<script src="js/orientation-maps-launcher.js?v=20261004a"></script>
+<script src="js/timetable.js?v=20261004a"></script>
+<script src="js/shared-ui.js?v=20261017t"></script>
+<script src="js/pages/auth-pages.js?v=20261017z"></script>
+<script src="js/pages/wrong-app.js?v=20261004a"></script>
+<script src="js/pages/home.js?v=20261018s"></script>
+<script src="js/orientation-institution.js?v=20261017a"></script>
+<script src="js/pages/orientation.js?v=20261017z"></script>
+<script src="js/pages/timetable.js?v=20261017x"></script>
+<script src="js/timetable-share.js?v=20261004a"></script>
+<script src="js/pages/campus.js?v=20261018p"></script>
+<script src="js/pages/groups.js?v=20261017x"></script>
+<script src="js/pages/seller.js?v=20261018t"></script>
+<script src="js/pages/entrepreneur.js?v=20261018t"></script>
+<script src="js/pages/market.js?v=20261017z"></script>
+<script src="js/pages/directory.js?v=20261017x"></script>
+<script src="js/pages/customer.js?v=20261018r"></script>
+<script src="js/pages/onboarding.js?v=20261004a"></script>
+<script src="js/pages/campus-setup.js?v=20261018r"></script>
+<script src="js/nav.js?v=20261017z"></script>
+<script src="js/app.js?v=20261017z"></script>
+</body>
+</html>

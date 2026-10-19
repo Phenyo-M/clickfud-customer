@@ -1,0 +1,4 @@
+# Only the website is uploaded to Vercel (this folder). Local tool state:
+.vscode
+.claude
+.netlify
